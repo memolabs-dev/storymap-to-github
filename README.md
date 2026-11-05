@@ -12,8 +12,9 @@ Product owners plan in FigJam, developers work in GitHub Issues and Projects, an
 
 - **Colours.** By default, after Jeff Patton's story map: yellow epics, blue activities (features), green steps, violet tasks, pink notes for the product owners. The Legend tab lists every colour found and lets you change what each one means.
 - **Columns.** A feature belongs to the nearest epic at or left of it, a step to the nearest feature, a task to the column it overlaps most.
-- **Releases.** A section named like a release (`P0`, `MVP`, `Release 1`, `R2`, `v1`, `Sprint 3`) holds its tasks. Without sections, a short label starting a row does the same for the tasks below it.
-- **Scope.** The whole page, or only the selection if something is selected. A section named `Legend` is skipped.
+- **Arrows.** An arrow between a task and a feature, step or epic sets the task's parent, whatever the column. An arrow between two tasks makes the lower one a sub-task.
+- **Releases.** A section named like a release (`P0`, `MVP`, `Release 1`, `R2`, `v1`, `Sprint 3`) holds its tasks. Otherwise short release tags (`P0`, `MVP`, any colour) label rows, and long horizontal lines, when the board has them, mark where each row starts and ends.
+- **Legend and scope.** The whole page, or only the selection if something is selected. A section named `Legend`, and stickies that explain the colours ("Epics and targets", "Steps: …"), are skipped. The Legend tab says what was read on the page.
 
 Comparing with GitHub, in the GitHub tab, reads the issues of a repository and matches titles (case, accents, `Epic:` prefixes and small words ignored). A match is a guess: click a badge to confirm it, pick the right issue, or mark the item as not on GitHub yet. Those choices stay on your computer.
 

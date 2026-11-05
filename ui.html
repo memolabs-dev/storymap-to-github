@@ -17,11 +17,11 @@
     --brand: var(--figma-color-bg-brand, #0d99ff);
     --on-brand: var(--figma-color-text-onbrand, #ffffff);
     --success: var(--figma-color-text-success, #0f6b3e);
-    --success-bg: var(--figma-color-bg-success, #e8f5ee);
+    --success-bg: var(--figma-color-bg-success-tertiary, #e8f5ee);
     --warning: var(--figma-color-text-warning, #8a5300);
-    --warning-bg: var(--figma-color-bg-warning, #fff3d6);
+    --warning-bg: var(--figma-color-bg-warning-tertiary, #fff3d6);
     --danger: var(--figma-color-text-danger, #c4291c);
-    --danger-bg: var(--figma-color-bg-danger, #ffe8e5);
+    --danger-bg: var(--figma-color-bg-danger-tertiary, #ffe8e5);
     --brand-text: var(--figma-color-text-brand, #0062b8);
     --radius: 6px;
     --gap: 8px;
@@ -195,14 +195,21 @@
       ${kind !== 'step' && kind !== 'note' ? badge(item.id) : ''}
     </div>`;
 
-  const keep = (t) => filter === 'all' || (filter === 'none' ? !t.release : t.release === filter);
+  const matchesFilter = (t) => filter === 'all' || (filter === 'none' ? !t.release : t.release === filter);
+  // A task stays visible when it or one of its sub-tasks is in the filter.
+  const keep = (t) => matchesFilter(t) || (t.subtasks || []).some(keep);
+
+  const taskHtml = (t) => {
+    const subs = (t.subtasks || []).filter(keep);
+    return `<li>${row(t, 'task')}${subs.length ? `<ul>${subs.map(taskHtml).join('')}</ul>` : ''}</li>`;
+  };
 
   const featureHtml = (f) => {
     const tasks = f.tasks.filter(keep);
     if (filter !== 'all' && !tasks.length) return '';
     return `<li>${row(f, 'feature')}
       ${f.steps.length ? `<div class="steps">Steps: ${f.steps.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
-      ${tasks.length ? `<ul>${tasks.map((t) => `<li>${row(t, 'task')}</li>`).join('')}</ul>` : ''}</li>`;
+      ${tasks.length ? `<ul>${tasks.map(taskHtml).join('')}</ul>` : ''}</li>`;
   };
 
   function renderPreview() {
@@ -224,7 +231,7 @@
     </div>` : '';
 
     const epics = b.epics.map((e) => {
-      const inner = [...e.features.map(featureHtml), ...e.tasks.filter(keep).map((t) => `<li>${row(t, 'task')}</li>`)].join('');
+      const inner = [...e.features.map(featureHtml), ...e.tasks.filter(keep).map(taskHtml)].join('');
       if (filter !== 'all' && !inner) return '';
       return `<li>${row(e, 'epic')}${inner ? `<ul>${inner}</ul>` : ''}</li>`;
     }).join('');
@@ -253,6 +260,11 @@
           ${['epic', 'feature', 'step', 'task', 'note', 'ignore'].map((t) => `<option value="${t}" ${data.legend[c.hex] === t ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}
         </select>
       </div>`).join('') : '<div class="empty">No coloured stickies on this page.</div>';
+    const types = Object.entries(data.nodeTypes || {}).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${c} ${t.toLowerCase().replace(/_/g, ' ')}`).join(', ');
+    const b = data.backlog.stats;
+    $('legend').insertAdjacentHTML('beforeend', `<p class="help" style="margin-top:12px">Read on this page: ${esc(types || 'nothing')}.
+      ${b.swimlaneLines ? `${b.swimlaneLines} swimlane lines split the release rows.` : 'No swimlane lines found: a task takes the last release label at or above it.'}
+      ${b.ignored} stickies skipped (legend, labels, empty or ignored colours).</p>`);
   }
 
   function renderGithub() {

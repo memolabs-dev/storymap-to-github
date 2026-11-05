@@ -61,6 +61,7 @@ function buildPalette(items) {
   const byHex = new Map();
   for (const item of items) {
     if (!item.fill || item.inLegend || (item.type !== 'STICKY' && item.type !== 'SHAPE_WITH_TEXT')) continue;
+    if (isReleaseLabel(item) || LEGEND_TEXT.test(text(item))) continue;
     const hex = hexOf(item.fill);
     if (!byHex.has(hex)) byHex.set(hex, { hex, hue: hueName(item.fill), count: 0, samples: [] });
     const entry = byHex.get(hex);
@@ -115,34 +116,74 @@ function maxOverlap(list, target) {
 // Releases come from sections named like a release ("P0 · MVP", "Release 1")
 // or from short labels that start a row. A task takes the section that holds
 // it, otherwise the last row label at or above it.
-function findReleases(items, legend) {
+// A short sticky, shape or text such as "P0", "MVP" or "Release 2" labels a
+// row, whatever its colour: boards often colour their release tags.
+function isReleaseLabel(item) {
+  if (item.type !== 'STICKY' && item.type !== 'SHAPE_WITH_TEXT' && item.type !== 'TEXT') return false;
+  const label = text(item);
+  return label.length <= 30 && RELEASE_PATTERN.test(label);
+}
+
+// A sticky that explains the colours ("Epics and targets", "Activities: …",
+// "Issues or sub-issues") belongs to the board's legend, not to the map.
+const LEGEND_TEXT = /^\s*(epics?|activit(y|ies)|steps?|tasks?|issues?|sub-?issues?|stor(y|ies)|features?)\b\s*(and\b|or\b|[:,(-]|$)/i;
+
+function findReleases(items) {
   const sections = [];
-  const rows = [];
+  const labels = [];
   for (const item of items) {
-    const label = item.type === 'SECTION' ? (item.name || '') : text(item);
-    const match = label.match(RELEASE_PATTERN);
-    if (!match) continue;
     if (item.type === 'SECTION') {
-      sections.push({ name: label.trim(), key: match[1].toUpperCase(), box: item });
-    } else if (label.length <= 60 && (item.type === 'TEXT' || !item.fill || legend[hexOf(item.fill)] === 'ignore')) {
-      rows.push({ name: label, key: match[1].toUpperCase(), y: item.y, h: item.h });
+      const match = (item.name || '').match(RELEASE_PATTERN);
+      if (match) sections.push({ name: item.name.trim(), box: item });
+    } else if (isReleaseLabel(item)) {
+      labels.push({ name: text(item), x: item.x, y: item.y, h: item.h });
     }
   }
-  rows.sort((a, b) => a.y - b.y);
-  return { sections, rows };
+  // Labels on the same line ("P0" next to "MVP") name one row: "P0 · MVP".
+  labels.sort((a, b) => a.y - b.y);
+  const rows = [];
+  for (const label of labels) {
+    const last = rows[rows.length - 1];
+    if (last && label.y < last.y + Math.max(last.h, label.h)) last.parts.push(label);
+    else rows.push({ y: label.y, h: label.h, parts: [label] });
+  }
+  for (const row of rows) row.name = row.parts.sort((a, b) => a.x - b.x).map((p) => p.name).join(' · ');
+
+  // Long horizontal lines split the board into swimlanes. When there are
+  // some, a task takes the label of its lane, wherever the label sits in it.
+  const rules = items
+    .filter((i) => (i.type === 'LINE' || i.type === 'CONNECTOR') && i.w >= 600 && i.w > 10 * i.h)
+    .map((i) => i.y + i.h / 2)
+    .sort((a, b) => a - b);
+  const lanes = [];
+  if (rules.length) {
+    const laneOf = (y) => rules.filter((r) => r <= y).length;
+    for (const row of rows) {
+      const lane = laneOf(row.y + row.h / 2);
+      if (!lanes[lane]) lanes[lane] = row.name;
+      else if (!lanes[lane].includes(row.name)) lanes[lane] += ` · ${row.name}`;
+    }
+    return { sections, rows, rules, lanes, laneOf };
+  }
+  return { sections, rows, rules, lanes, laneOf: null };
 }
 
 function releaseOf(item, releases) {
   const c = center(item);
   const section = releases.sections.find((s) => contains(s.box, c));
   if (section) return section.name;
+  if (releases.laneOf) {
+    const lane = releases.lanes[releases.laneOf(c.y)];
+    if (lane) return lane;
+  }
   let row = null;
   for (const r of releases.rows) if (r.y <= c.y + r.h / 2) row = r;
   return row ? row.name : null;
 }
 
 // Turn the raw board items into the backlog tree.
-// items: [{ id, type, text, name, fill, x, y, w, h, inLegend }]
+// items: [{ id, type, text, name, fill, x, y, w, h, inLegend }] and connectors
+//        [{ id, type: 'CONNECTOR', from, to }]
 // legend: { '#rrggbb': type }
 function buildBacklog(items, legend) {
   const typed = { epic: [], feature: [], step: [], task: [], note: [] };
@@ -150,7 +191,7 @@ function buildBacklog(items, legend) {
   const unmapped = new Set();
   for (const item of items) {
     if (item.type !== 'STICKY' && item.type !== 'SHAPE_WITH_TEXT') continue;
-    if (item.inLegend || !text(item)) {
+    if (item.inLegend || !text(item) || isReleaseLabel(item) || LEGEND_TEXT.test(text(item))) {
       ignored += 1;
       continue;
     }
@@ -168,7 +209,7 @@ function buildBacklog(items, legend) {
     typed[type].push({ id: item.id, title: text(item), x: item.x, y: item.y, w: item.w, h: item.h, hex });
   }
 
-  const releases = findReleases(items.filter((i) => !i.inLegend), legend);
+  const releases = findReleases(items.filter((i) => !i.inLegend));
   const byX = (a, b) => a.x - b.x || a.y - b.y;
   const epics = typed.epic.sort(byX).map((e) => ({ ...e, features: [], tasks: [] }));
   const features = typed.feature.sort(byX).map((f) => ({ ...f, steps: [], tasks: [] }));
@@ -188,11 +229,43 @@ function buildBacklog(items, legend) {
     } else orphans.push({ ...step, kind: 'step' });
   }
 
+  // Arrows drawn on the board win over position: an arrow between a task and
+  // a feature, step or epic gives the task its parent; an arrow between two
+  // tasks makes the lower one a sub-task of the upper one.
+  const kindOf = new Map();
+  for (const e of epics) kindOf.set(e.id, { kind: 'epic', node: e });
+  for (const f of features) kindOf.set(f.id, { kind: 'feature', node: f });
+  for (const s of typed.step) kindOf.set(s.id, { kind: 'step', node: s });
+  for (const t of typed.task) kindOf.set(t.id, { kind: 'task', node: t });
+  const drawnParent = new Map();
+  const subtaskOf = new Map();
+  for (const c of items) {
+    if (c.type !== 'CONNECTOR' || (c.w >= 600 && c.w > 10 * c.h)) continue; // a swimlane line, not an arrow
+    const a = kindOf.get(c.from);
+    const b = kindOf.get(c.to);
+    if (!a || !b || a === b) continue;
+    if (a.kind === 'task' && b.kind === 'task') {
+      const [upper, lower] = a.node.y < b.node.y || (a.node.y === b.node.y && a.node.x < b.node.x) ? [a.node, b.node] : [b.node, a.node];
+      if (!subtaskOf.has(lower.id)) subtaskOf.set(lower.id, upper.id);
+    } else if (a.kind === 'task' || b.kind === 'task') {
+      const [task, other] = a.kind === 'task' ? [a, b] : [b, a];
+      if (!drawnParent.has(task.node.id)) drawnParent.set(task.node.id, other);
+    }
+  }
+
   const columns = [...features, ...typed.step];
+  const taskById = new Map();
   for (const raw of typed.task.sort((a, b) => a.y - b.y || a.x - b.x)) {
-    const task = { ...raw, release: releaseOf(raw, releases) };
-    const column = maxOverlap(columns, task) || nearestLeft(features, center(task).x);
-    const feature = column ? column.feature || column : null;
+    const task = { ...raw, release: releaseOf(raw, releases), subtasks: [] };
+    taskById.set(task.id, task);
+    if (subtaskOf.has(task.id)) continue;
+    const drawn = drawnParent.get(task.id);
+    if (drawn && drawn.kind === 'epic') {
+      drawn.node.tasks.push(task);
+      continue;
+    }
+    const column = drawn ? drawn.node : maxOverlap(columns, task) || nearestLeft(features, center(task).x);
+    const feature = column ? column.feature || (features.includes(column) ? column : null) : null;
     if (feature) {
       feature.tasks.push(task);
       continue;
@@ -201,14 +274,16 @@ function buildBacklog(items, legend) {
     if (epic) epic.tasks.push(task);
     else orphans.push({ ...task, kind: 'task' });
   }
+  for (const [childId, parentId] of subtaskOf) taskById.get(parentId).subtasks.push(taskById.get(childId));
 
   // Features with no epic above them stand on their own when the map has no epics.
   const looseFeatures = epics.length ? [] : features;
   for (const f of features) for (const s of f.steps) delete s.feature;
 
-  const names = [...releases.sections.map((s) => s.name), ...releases.rows.map((r) => r.name)];
+  const rowNames = releases.laneOf ? releases.lanes.filter(Boolean) : releases.rows.map((r) => r.name);
+  const names = [...releases.sections.map((s) => s.name), ...rowNames];
   const milestones = [...new Set(names)];
-  const tasks = [...epics.flatMap((e) => [...e.tasks, ...e.features.flatMap((f) => f.tasks)]), ...looseFeatures.flatMap((f) => f.tasks)];
+  const tasks = [...taskById.values()];
 
   return {
     epics,
@@ -224,6 +299,7 @@ function buildBacklog(items, legend) {
       notes: typed.note.length,
       ignored,
       withoutMilestone: tasks.filter((t) => !t.release).length,
+      swimlaneLines: releases.rules.length,
     },
     unmapped: [...unmapped],
   };
@@ -268,12 +344,13 @@ function similarity(a, b, loose = false) {
 const isEpicIssue = (issue) => issue.type === 'Epic' || EPIC_TITLE.test(issue.title);
 
 function allItems(backlog) {
-  const tasksOf = (f) => f.tasks;
+  const withSubtasks = (tasks) => tasks.flatMap((t) => [t, ...withSubtasks(t.subtasks || [])]);
+  const tasksOf = (f) => withSubtasks(f.tasks);
   return [
     ...backlog.epics.map((e) => ({ item: e, kind: 'epic' })),
     ...backlog.epics.flatMap((e) => [
       ...e.features.map((f) => ({ item: f, kind: 'feature' })),
-      ...[...e.tasks, ...e.features.flatMap(tasksOf)].map((t) => ({ item: t, kind: 'task' })),
+      ...[...withSubtasks(e.tasks), ...e.features.flatMap(tasksOf)].map((t) => ({ item: t, kind: 'task' })),
     ]),
     ...backlog.looseFeatures.map((f) => ({ item: f, kind: 'feature' })),
     ...backlog.looseFeatures.flatMap(tasksOf).map((t) => ({ item: t, kind: 'task' })),
@@ -319,16 +396,19 @@ function toMarkdown(backlog, matches = {}) {
     return m && m.number ? ` (#${m.number}${m.status === 'maybe' ? '?' : ''})` : '';
   };
   const lines = [];
-  const task = (t) => lines.push(`  - [ ] Task: ${t.title}${t.release ? ` · ${t.release}` : ''}${ref(t)}`);
+  const task = (t, depth = 1) => {
+    lines.push(`${'  '.repeat(depth)}- [ ] ${depth > 1 ? 'Sub-task' : 'Task'}: ${t.title}${t.release ? ` · ${t.release}` : ''}${ref(t)}`);
+    for (const s of t.subtasks || []) task(s, depth + 1);
+  };
   const feature = (f, indent) => {
     lines.push(`${indent}- Feature: ${f.title}${ref(f)}`);
     for (const s of f.steps) lines.push(`${indent}  - Step: ${s.title}`);
-    f.tasks.forEach(task);
+    f.tasks.forEach((t) => task(t));
   };
   for (const epic of backlog.epics) {
     lines.push(`## Epic: ${epic.title}${ref(epic)}`, '');
     for (const f of epic.features) feature(f, '');
-    epic.tasks.forEach(task);
+    epic.tasks.forEach((t) => task(t));
     lines.push('');
   }
   for (const f of backlog.looseFeatures) feature(f, '');
@@ -337,7 +417,7 @@ function toMarkdown(backlog, matches = {}) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, toMarkdown };
+  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, toMarkdown };
 }
 
 // ---------------------------------------------------------------------------
@@ -373,11 +453,14 @@ if (typeof figma !== 'undefined') {
       item.inLegend = isInLegend(node);
     } else if (node.type === 'TEXT') {
       item.text = node.characters;
+    } else if (node.type === 'CONNECTOR') {
+      item.from = node.connectorStart && node.connectorStart.endpointNodeId;
+      item.to = node.connectorEnd && node.connectorEnd.endpointNodeId;
     }
     return item;
   };
 
-  const WANTED = new Set(['STICKY', 'SHAPE_WITH_TEXT', 'SECTION', 'TEXT']);
+  const WANTED = new Set(['STICKY', 'SHAPE_WITH_TEXT', 'SECTION', 'TEXT', 'CONNECTOR', 'LINE']);
 
   const readBoard = () => {
     const selection = figma.currentPage.selection;
@@ -392,6 +475,9 @@ if (typeof figma !== 'undefined') {
       state.scope = 'page';
       nodes = figma.currentPage.findAll((n) => WANTED.has(n.type));
     }
+    // What the page is made of, shown in the Legend tab to explain a reading.
+    state.nodeTypes = {};
+    for (const n of figma.currentPage.findAll(() => true)) state.nodeTypes[n.type] = (state.nodeTypes[n.type] || 0) + 1;
     state.items = nodes.map(toItem);
     state.palette = buildPalette(state.items);
   };
@@ -416,6 +502,7 @@ if (typeof figma !== 'undefined') {
       backlog: state.backlog,
       matches: state.matches,
       issues: state.issues ? state.issues.map((i) => ({ number: i.number, title: i.title })) : [],
+      nodeTypes: state.nodeTypes,
       markdown: toMarkdown(state.backlog, state.matches),
       settings: { repo: state.repo, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
     });

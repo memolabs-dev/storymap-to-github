@@ -132,6 +132,56 @@ test('links set by hand win over guesses, and 0 means not on GitHub', () => {
   assert.deepEqual([m[office].status, m[office].confirmed], ['new', true]);
 });
 
+test('coloured release tags and legend stickies are read as labels, not items', () => {
+  const items = [
+    ...board().filter((i) => i.text !== 'P0 · MVP'),
+    sticky('P0', YELLOW, -420, 900, { w: 40, h: 24 }),
+    label('MVP', -360, 900),
+    sticky('Activities', BLUE, -700, 300, { w: 80, h: 24 }),
+    sticky('Steps : what users go through', GREEN, -700, 600, { w: 80, h: 24 }),
+    sticky('Issues or Sub-issues, divided by release', VIOLET, -700, 800, { w: 80, h: 24 }),
+  ];
+  const b = core.buildBacklog(items, legend);
+  assert.deepEqual(b.epics.map((e) => e.title), ['Catalogue', 'Borrowing']);
+  assert.equal(b.stats.features, 3);
+  assert.equal(b.stats.tasks, 3);
+  assert.deepEqual(b.milestones, ['P0 · MVP', 'P1']);
+  assert.equal(find(b, 'Back-office').release, 'P0 · MVP');
+  assert.ok(!core.buildPalette(items).some((c) => c.samples.includes('P0')), 'labels stay out of the legend tab');
+});
+
+test('swimlane lines give each task the label of its lane', () => {
+  // The P0 label sits in the middle of its lane; a task at the top of the
+  // lane still belongs to P0, not to the lane above.
+  const items = [
+    ...board().filter((i) => i.text !== 'P0 · MVP'),
+    label('P0 · MVP', -400, 1150),
+    { id: 'l1', type: 'LINE', x: -500, y: 880, w: 3000, h: 0 },
+    // FigJam lines are connectors, sometimes attached to a section at both ends.
+    { id: 'l2', type: 'CONNECTOR', from: 'section-1', to: 'section-1', x: -500, y: 1380, w: 3000, h: 30 },
+  ];
+  const b = core.buildBacklog(items, legend);
+  assert.equal(find(b, 'Back-office').release, 'P0 · MVP');
+  assert.equal(find(b, 'Import books from a spreadsheet').release, 'P1');
+  assert.deepEqual(b.milestones, ['P0 · MVP', 'P1']);
+});
+
+test('arrows on the board set the parent and make sub-tasks', () => {
+  const items = board();
+  const id = (t) => items.find((i) => i.text === t).id;
+  items.push(
+    sticky('Barcode scan', VIOLET, 10, 1180),
+    { id: 'c1', type: 'CONNECTOR', from: id('Reserve a book'), to: id('Back-office') },
+    { id: 'c2', type: 'CONNECTOR', from: id('Back-office'), to: 's15' },
+  );
+  const b = core.buildBacklog(items, legend);
+  const borrowing = b.epics[1].features[0];
+  assert.deepEqual(borrowing.tasks.map((t) => t.title), ['Back-office', 'Reservation calendar'], 'the arrow wins over the column');
+  assert.deepEqual(find(b, 'Back-office').subtasks.map((t) => t.title), ['Barcode scan']);
+  assert.equal(b.stats.tasks, 4);
+  assert.match(core.toMarkdown(b), / {4}- \[ \] Sub-task: Barcode scan · P0 · MVP/);
+});
+
 test('the Markdown draft lists the tree', () => {
   const md = core.toMarkdown(core.buildBacklog(board(), legend));
   assert.match(md, /## Epic: Catalogue/);
