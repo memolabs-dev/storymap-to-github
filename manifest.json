@@ -1,0 +1,13 @@
+{
+  "name": "Storymap to GitHub",
+  "id": "storymap-to-github-dev",
+  "api": "1.0.0",
+  "editorType": ["figjam"],
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["https://api.github.com"],
+    "reasoning": "Reads the issues of the repository you name, to mark each story map item as new or already existing."
+  }
+}

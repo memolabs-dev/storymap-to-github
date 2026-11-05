@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  /* Figma injects the --figma-color-* variables (themeColors: true).
+     The fallbacks only serve the browser preview in dev/. */
+  :root {
+    --bg: var(--figma-color-bg, #ffffff);
+    --bg-2: var(--figma-color-bg-secondary, #f5f5f5);
+    --bg-hover: var(--figma-color-bg-hover, #f0f0f0);
+    --bg-selected: var(--figma-color-bg-selected, #e5f4ff);
+    --text: var(--figma-color-text, #1e1e1e);
+    --text-2: var(--figma-color-text-secondary, #5c5c5c);
+    --text-3: var(--figma-color-text-tertiary, #757575);
+    --border: var(--figma-color-border, #e6e6e6);
+    --brand: var(--figma-color-bg-brand, #0d99ff);
+    --on-brand: var(--figma-color-text-onbrand, #ffffff);
+    --success: var(--figma-color-text-success, #0f6b3e);
+    --success-bg: var(--figma-color-bg-success, #e8f5ee);
+    --warning: var(--figma-color-text-warning, #8a5300);
+    --warning-bg: var(--figma-color-bg-warning, #fff3d6);
+    --danger: var(--figma-color-text-danger, #c4291c);
+    --danger-bg: var(--figma-color-bg-danger, #ffe8e5);
+    --brand-text: var(--figma-color-text-brand, #0062b8);
+    --radius: 6px;
+    --gap: 8px;
+    --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --dot-epic: #f5c33b;
+    --dot-feature: #4ba3f7;
+    --dot-step: #57c26a;
+    --dot-task: #a77bf3;
+    --dot-note: #f07fb5;
+  }
+  .dev-dark {
+    --bg: #2c2c2c; --bg-2: #383838; --bg-hover: #3d3d3d; --bg-selected: #1f3a52;
+    --text: #ffffff; --text-2: #c2c2c2; --text-3: #a3a3a3; --border: #444444;
+    --success: #79d297; --success-bg: #1d3a28; --warning: #f3c26b; --warning-bg: #45351a;
+    --danger: #ff9e8f; --danger-bg: #4a1f1a; --brand-text: #7cc4fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 12px/1.45 var(--font); display: flex; flex-direction: column; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+  header { padding: 12px 12px 0; border-bottom: 1px solid var(--border); }
+  .title-row { display: flex; align-items: center; gap: var(--gap); }
+  h1 { font-size: 13px; font-weight: 600; margin: 0; flex: 1; }
+  .scope { color: var(--text-2); margin: 2px 0 10px; }
+  .scope strong { color: var(--text); font-weight: 500; }
+  .tabs { display: flex; gap: 2px; }
+  .tab { border: 0; background: none; padding: 8px 10px; color: var(--text-2); border-bottom: 2px solid transparent; font-weight: 500; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+  .tab .count { color: var(--text-3); font-weight: 400; margin-left: 3px; }
+
+  main { flex: 1; overflow: auto; padding: 12px; }
+  [hidden] { display: none !important; }
+  .btn { border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius); padding: 0 10px; height: 28px; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { background: var(--bg-hover); }
+  .btn.primary { background: var(--text); border-color: var(--text); color: var(--bg); }
+  .btn.ghost { border-color: transparent; }
+
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+  .stat { background: var(--bg-2); border-radius: var(--radius); padding: 8px; }
+  .stat b { display: block; font-size: 16px; font-weight: 600; line-height: 1.2; }
+  .stat span { color: var(--text-2); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+  .chip { border: 1px solid var(--border); background: var(--bg); border-radius: 999px; padding: 2px 9px; color: var(--text-2); }
+  .chip[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+  .notice { border-radius: var(--radius); padding: 8px 10px; margin-bottom: 10px; }
+  .notice.warn { background: var(--warning-bg); color: var(--warning); }
+  .notice.error { background: var(--danger-bg); color: var(--danger); }
+  .notice.ok { background: var(--success-bg); color: var(--success); }
+  .notice.info { background: var(--bg-2); color: var(--text-2); }
+  .notice a, .linkish { color: inherit; text-decoration: underline; background: none; border: 0; padding: 0; }
+
+  .tree { list-style: none; margin: 0; padding: 0; }
+  .tree ul { list-style: none; margin: 0; padding: 0 0 0 16px; border-left: 1px solid var(--border); margin-left: 7px; }
+  .row { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 6px; border-radius: var(--radius); cursor: pointer; }
+  .row:hover, .row:focus-visible { background: var(--bg-hover); }
+  .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .dot.epic { background: var(--dot-epic); } .dot.feature { background: var(--dot-feature); }
+  .dot.step { background: var(--dot-step); } .dot.task { background: var(--dot-task); } .dot.note { background: var(--dot-note); }
+  .kind { color: var(--text-3); width: 50px; flex: none; }
+  .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.epic .label { font-weight: 600; }
+  .steps { color: var(--text-2); padding: 0 6px 4px 66px; }
+  .pill { border-radius: 4px; padding: 0 5px; font-size: 11px; line-height: 18px; white-space: nowrap; flex: none; }
+  .pill.milestone { background: var(--bg-2); color: var(--text-2); }
+  .pill.new { background: var(--bg-selected); color: var(--brand-text); }
+  .pill.exists { background: var(--success-bg); color: var(--success); }
+  .pill.maybe { background: var(--warning-bg); color: var(--warning); }
+  button.pill { border: 0; cursor: pointer; min-height: 22px; }
+  button.pill:hover { filter: brightness(0.95); }
+  .pill-select { width: 150px; height: 24px; font-size: 11px; flex: none; }
+  .section-title { color: var(--text-2); font-weight: 600; margin: 16px 0 6px; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
+
+  .legend-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 110px; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .swatch { width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--border); }
+  .legend-row .samples { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  select, input[type="text"], input[type="password"] { width: 100%; height: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); padding: 0 8px; }
+  label.field { display: block; margin-bottom: 12px; }
+  label.field span { display: block; color: var(--text-2); margin-bottom: 4px; }
+  .help { color: var(--text-3); margin: 4px 0 0; }
+
+  footer { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: var(--gap); }
+  footer .note { flex: 1; color: var(--text-3); }
+  .empty { text-align: center; color: var(--text-2); padding: 40px 16px; }
+  .empty b { display: block; color: var(--text); font-size: 13px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title-row">
+    <h1>Storymap to GitHub</h1>
+    <button class="btn ghost" id="refresh" title="Read the board again">Refresh</button>
+  </div>
+  <p class="scope" id="scope">Reading the board…</p>
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="preview">Preview</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="legend">Legend<span class="count" id="legend-count"></span></button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="github">GitHub</button>
+  </nav>
+</header>
+
+<main>
+  <section id="tab-preview" role="tabpanel"></section>
+  <section id="tab-legend" role="tabpanel" hidden>
+    <p class="help" style="margin:0 0 8px">Each sticky colour on the board becomes one kind of item. Change a line to fix the reading.</p>
+    <div id="legend"></div>
+  </section>
+  <section id="tab-github" role="tabpanel" hidden>
+    <div id="gh-status"></div>
+    <label class="field"><span>Repository</span><input type="text" id="repo" placeholder="owner/name" autocomplete="off" spellcheck="false"></label>
+    <label class="field"><span>Token (optional)</span><input type="password" id="token" placeholder="Only needed for a private repository" autocomplete="off"></label>
+    <p class="help" id="token-help">Read-only use: a fine-grained token with Issues: read is enough. It stays on this computer.</p>
+    <p style="margin-top:12px"><button class="btn primary" id="compare">Compare with issues</button> <button class="btn ghost" id="forget" hidden>Forget token</button></p>
+    <p class="help">The plugin only reads issues to mark each item as new, existing or possibly existing. It creates nothing.</p>
+  </section>
+</main>
+
+<footer>
+  <span class="note">Preview only: nothing is written to GitHub or the board.</span>
+  <button class="btn" id="copy">Copy Markdown</button>
+</footer>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const send = (msg) => parent.postMessage({ pluginMessage: msg }, '*');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const TYPE_LABEL = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'PO note', ignore: 'Ignore' };
+
+  let data = null;
+  let filter = 'all';
+
+  for (const tab of document.querySelectorAll('.tab')) {
+    tab.addEventListener('click', () => {
+      for (const t of document.querySelectorAll('.tab')) t.setAttribute('aria-selected', String(t === tab));
+      for (const panel of document.querySelectorAll('[role="tabpanel"]')) panel.hidden = panel.id !== `tab-${tab.dataset.tab}`;
+    });
+  }
+
+  // The badge says what GitHub already has. Clicking it lets the team confirm
+  // or correct the match; the choice is kept on this computer.
+  const badge = (id) => {
+    const m = data.matches[id];
+    if (!m) return '';
+    const btn = (cls, label, tip) => `<button class="pill ${cls}" data-link="${esc(id)}" title="${esc(tip)}. Click to change.">${label}</button>`;
+    if (m.status === 'linked') return btn('exists', `#${m.number}`, `Linked by you to: ${m.title}`);
+    if (m.status === 'exists') return btn('exists', `#${m.number}`, `Same title as: ${m.title}`);
+    if (m.status === 'maybe') return btn('maybe', `#${m.number}?`, `Close to: ${m.title}`);
+    return btn('new', 'New', m.confirmed ? 'You marked it as not on GitHub yet' : 'No issue with a close title');
+  };
+
+  const linkPicker = (id) => {
+    const current = data.matches[id] || {};
+    const options = data.issues.map((i) => `<option value="${i.number}" ${current.number === i.number ? 'selected' : ''}>#${i.number} ${esc(i.title)}</option>`).join('');
+    return `<select class="pill-select" data-link-select="${esc(id)}" aria-label="GitHub issue for this item">
+      <option value="">Is it an existing issue?</option>
+      <option value="0">Not on GitHub yet</option>
+      <option value="auto">Guess from the title</option>
+      ${options}
+    </select>`;
+  };
+
+  const row = (item, kind) => `
+    <div class="row ${kind}" tabindex="0" data-id="${esc(item.id)}">
+      <span class="dot ${kind}"></span><span class="kind">${TYPE_LABEL[kind]}</span>
+      <span class="label" title="${esc(item.title)}">${esc(item.title)}</span>
+      ${item.release ? `<span class="pill milestone">${esc(item.release)}</span>` : ''}
+      ${kind !== 'step' && kind !== 'note' ? badge(item.id) : ''}
+    </div>`;
+
+  const keep = (t) => filter === 'all' || (filter === 'none' ? !t.release : t.release === filter);
+
+  const featureHtml = (f) => {
+    const tasks = f.tasks.filter(keep);
+    if (filter !== 'all' && !tasks.length) return '';
+    return `<li>${row(f, 'feature')}
+      ${f.steps.length ? `<div class="steps">Steps: ${f.steps.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
+      ${tasks.length ? `<ul>${tasks.map((t) => `<li>${row(t, 'task')}</li>`).join('')}</ul>` : ''}</li>`;
+  };
+
+  function renderPreview() {
+    const b = data.backlog;
+    const el = $('tab-preview');
+    const total = b.stats.epics + b.stats.features + b.stats.tasks;
+    if (!total) {
+      el.innerHTML = `<div class="empty"><b>No story map found here</b>
+        ${data.palette.length ? 'The stickies on this page are not mapped to epics, features or tasks yet. Open <button class="linkish" data-goto="legend">Legend</button> to say what each colour means.' : 'Open the page that holds the story map, or select it, then press Refresh.'}</div>`;
+      return;
+    }
+    const notices = [];
+    if (b.unmapped.length) notices.push(`<div class="notice warn">${b.unmapped.length} colour${b.unmapped.length > 1 ? 's are' : ' is'} not in the legend. <button class="linkish" data-goto="legend">Map them</button></div>`);
+    if (b.orphans.length) notices.push(`<div class="notice warn">${b.orphans.length} item${b.orphans.length > 1 ? 's have' : ' has'} no parent column. They are listed at the bottom.</div>`);
+    if (!b.milestones.length && b.stats.tasks) notices.push('<div class="notice info">No release rows found. Name a section or a row label "P0", "MVP" or "Release 1" to get milestones.</div>');
+
+    const chips = b.milestones.length ? `<div class="chips" role="group" aria-label="Filter by milestone">
+      ${['all', ...b.milestones, ...(b.stats.withoutMilestone ? ['none'] : [])].map((m) => `<button class="chip" aria-pressed="${filter === m}" data-filter="${esc(m)}">${m === 'all' ? 'All' : m === 'none' ? 'No milestone' : esc(m)}</button>`).join('')}
+    </div>` : '';
+
+    const epics = b.epics.map((e) => {
+      const inner = [...e.features.map(featureHtml), ...e.tasks.filter(keep).map((t) => `<li>${row(t, 'task')}</li>`)].join('');
+      if (filter !== 'all' && !inner) return '';
+      return `<li>${row(e, 'epic')}${inner ? `<ul>${inner}</ul>` : ''}</li>`;
+    }).join('');
+    const loose = b.looseFeatures.map(featureHtml).join('');
+
+    el.innerHTML = `
+      <div class="summary">
+        <div class="stat"><b>${b.stats.epics}</b><span>epics</span></div>
+        <div class="stat"><b>${b.stats.features}</b><span>features</span></div>
+        <div class="stat"><b>${b.stats.tasks}</b><span>tasks</span></div>
+        <div class="stat"><b>${b.milestones.length}</b><span>milestones</span></div>
+      </div>
+      ${notices.join('')}${chips}
+      <ul class="tree">${epics}${loose}</ul>
+      ${b.notes.length ? `<p class="section-title">PO notes, not issues</p><ul class="tree">${b.notes.map((x) => `<li>${row(x, 'note')}</li>`).join('')}</ul>` : ''}
+      ${b.orphans.length ? `<p class="section-title">Without a parent</p><ul class="tree">${b.orphans.map((x) => `<li>${row(x, x.kind)}</li>`).join('')}</ul>` : ''}`;
+  }
+
+  function renderLegend() {
+    $('legend-count').textContent = data.palette.length ? ` ${data.palette.length}` : '';
+    $('legend').innerHTML = data.palette.length ? data.palette.map((c) => `
+      <div class="legend-row">
+        <span class="swatch" style="background:${esc(c.hex)}"></span>
+        <div><div>${c.count} ${c.hue} ${c.count > 1 ? 'stickies' : 'sticky'}</div><div class="samples" title="${esc(c.samples.join(' · '))}">${esc(c.samples.join(' · ')) || '<i>no text</i>'}</div></div>
+        <select data-hex="${esc(c.hex)}" aria-label="Meaning of ${esc(c.hue)} stickies">
+          ${['epic', 'feature', 'step', 'task', 'note', 'ignore'].map((t) => `<option value="${t}" ${data.legend[c.hex] === t ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}
+        </select>
+      </div>`).join('') : '<div class="empty">No coloured stickies on this page.</div>';
+  }
+
+  function renderGithub() {
+    const s = data.settings;
+    if (document.activeElement !== $('repo')) $('repo').value = s.repo || '';
+    $('token').placeholder = s.hasToken ? 'Saved on this computer' : 'Only needed for a private repository';
+    $('forget').hidden = !s.hasToken;
+  }
+
+  function render() {
+    const what = data.scope === 'selection' ? 'the selection' : `page <strong>${esc(data.page)}</strong>`;
+    const matched = data.settings.issuesLoaded !== null ? ` · compared with ${data.settings.issuesLoaded} issues of <strong>${esc(data.settings.repo)}</strong>` : '';
+    $('scope').innerHTML = `Reading ${what}${matched}`;
+    renderPreview();
+    renderLegend();
+    renderGithub();
+  }
+
+  document.addEventListener('click', (e) => {
+    const pill = e.target.closest('[data-link]');
+    if (pill) {
+      if (!data.issues.length) { document.querySelector('.tab[data-tab="github"]').click(); return; }
+      pill.outerHTML = linkPicker(pill.dataset.link);
+      const select = document.querySelector(`[data-link-select="${CSS.escape(pill.dataset.link)}"]`);
+      select.focus();
+      return;
+    }
+    if (e.target.closest('[data-link-select]')) return;
+    const goto = e.target.closest('[data-goto]');
+    if (goto) document.querySelector(`.tab[data-tab="${goto.dataset.goto}"]`).click();
+    const chip = e.target.closest('[data-filter]');
+    if (chip) { filter = chip.dataset.filter; renderPreview(); }
+    const r = e.target.closest('.row[data-id]');
+    if (r) send({ type: 'focus', id: r.dataset.id });
+  });
+  document.addEventListener('keydown', (e) => {
+    const r = e.target.closest && e.target.closest('.row[data-id]');
+    if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); send({ type: 'focus', id: r.dataset.id }); }
+  });
+  document.addEventListener('change', (e) => {
+    if (e.target.matches('select[data-hex]')) send({ type: 'set-legend', hex: e.target.dataset.hex, value: e.target.value });
+    if (e.target.matches('select[data-link-select]') && e.target.value !== '') {
+      const v = e.target.value;
+      send({ type: 'link', id: e.target.dataset.linkSelect, number: v === 'auto' ? null : Number(v) });
+    }
+  });
+  $('refresh').addEventListener('click', () => { $('scope').textContent = 'Reading the board…'; send({ type: 'refresh' }); });
+  $('compare').addEventListener('click', () => { send({ type: 'compare', repo: $('repo').value, token: $('token').value }); $('token').value = ''; });
+  $('forget').addEventListener('click', () => send({ type: 'forget-token' }));
+  $('copy').addEventListener('click', () => {
+    if (!data) return;
+    const area = document.createElement('textarea');
+    area.value = data.markdown;
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    $('copy').textContent = ok ? 'Copied' : 'Copy failed';
+    setTimeout(() => { $('copy').textContent = 'Copy Markdown'; }, 1500);
+  });
+
+  window.onmessage = (event) => {
+    const msg = event.data && event.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === 'board') { data = msg; render(); }
+    else if (msg.type === 'status') {
+      $('gh-status').innerHTML = `<div class="notice ${msg.state === 'error' ? 'error' : msg.state === 'ok' ? 'ok' : 'info'}" role="status">${esc(msg.text)}</div>`;
+    } else if (msg.type === 'selection-changed' && data && !$('reread')) {
+      $('scope').insertAdjacentHTML('beforeend', ' · <button class="linkish" id="reread">selection changed, read again</button>');
+      $('reread').onclick = () => $('refresh').click();
+    }
+  };
+
+  send({ type: 'ready' });
+</script>
+</body>
+</html>

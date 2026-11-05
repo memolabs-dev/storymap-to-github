@@ -1,0 +1,13 @@
+{
+  "name": "storymap-to-github",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FigJam plugin: preview a user story map as GitHub epics, features, tasks and milestones",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
