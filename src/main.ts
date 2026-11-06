@@ -98,8 +98,28 @@ const state: State = {
   publishing: { ...DEFAULT_PUBLISHING },
 }
 
-// Settings that belong to one board are stored under the file's name.
-const fileKey = (name: string) => `${name}:${figma.root.name}`
+// Settings that belong to one board are stored under the file's name and
+// an id kept in the file, so two files with the same name stay apart.
+// (figma.fileKey would be simpler, but only private plugins may read it.)
+const BOARD_ID_KEY = 'storymap-board-id'
+let boardId = ''
+const fileKey = (name: string) => `${name}:${figma.root.name}${boardId ? `:${boardId}` : ''}`
+
+// Gives the file its id on first use, and moves the settings saved under
+// the name alone, before the id existed, to their new key.
+async function ensureBoardId() {
+  boardId = figma.root.getPluginData(BOARD_ID_KEY)
+  if (boardId) return
+  const id = Math.random().toString(36).slice(2, 10)
+  for (const name of ['repo', 'project', 'reading', 'labels', 'guide', 'links']) {
+    const old = await figma.clientStorage.getAsync(`${name}:${figma.root.name}`)
+    if (old === undefined) continue
+    await figma.clientStorage.setAsync(`${name}:${figma.root.name}:${id}`, old)
+    await figma.clientStorage.deleteAsync(`${name}:${figma.root.name}`)
+  }
+  figma.root.setPluginData(BOARD_ID_KEY, id)
+  boardId = id
+}
 
 const solidFill = (node: StickyNode | ShapeWithTextNode): RGB | null => {
   const fills = node.fills
@@ -186,6 +206,7 @@ async function moveOldLinks() {
 }
 
 async function loadSettings() {
+  await ensureBoardId()
   const saved = ((await figma.clientStorage.getAsync('legend')) || {}) as Record<string, ItemType>
   state.legend = { ...defaultLegend(state.palette), ...saved }
   // Each board has its own repository and project board, so opening one
