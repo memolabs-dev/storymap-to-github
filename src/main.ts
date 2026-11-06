@@ -29,6 +29,7 @@ import type {
   RefreshHandler,
   ResizeWindowHandler,
   SelectedHandler,
+  SetGuideHandler,
   SetLabelsHandler,
   SetLegendHandler,
   SetModeHandler,
@@ -36,6 +37,7 @@ import type {
   StatusHandler,
   WhyHandler,
   WhyResultHandler,
+  Guide,
 } from './types'
 
 // The plugin data key that marks the labels this plugin puts on the board.
@@ -58,6 +60,8 @@ interface State {
   rowTypes: Record<string, ItemType>
   nodeTypes: Record<string, number>
   labelsOn: boolean
+  guide: Guide
+  readAt: number | null
 }
 
 const state: State = {
@@ -76,6 +80,8 @@ const state: State = {
   rowTypes: {},
   nodeTypes: {},
   labelsOn: false,
+  guide: { readingConfirmed: false, hidden: false },
+  readAt: null,
 }
 
 // Settings that belong to one board are stored under the file's name.
@@ -137,6 +143,7 @@ async function loadSettings() {
   state.mode = reading.mode || 'auto'
   state.rowTypes = reading.rowTypes || {}
   state.labelsOn = Boolean(await figma.clientStorage.getAsync(fileKey('labels')))
+  state.guide = { readingConfirmed: false, hidden: false, ...((await figma.clientStorage.getAsync(fileKey('guide'))) || {}) }
 }
 
 const saveReading = () => figma.clientStorage.setAsync(fileKey('reading'), { mode: state.mode, rowTypes: state.rowTypes })
@@ -172,6 +179,8 @@ function publish() {
     nodeTypes: state.nodeTypes,
     markdown: toMarkdown(state.backlog, state.matches),
     labelsOn: state.labelsOn,
+    guide: state.guide,
+    readAt: state.readAt,
     settings: {
       repo: state.repo,
       project: state.project,
@@ -377,9 +386,33 @@ function onSelectionChange() {
   emit<SelectedHandler>('SELECTED', id)
 }
 
+// Reads the issues of the connected repository, and the sprints of its
+// project board when one is named, then shows the result.
+async function compare() {
+  emit<StatusHandler>('STATUS', { state: 'loading', text: `Reading issues of ${state.repo}…` })
+  state.issues = await fetchIssues()
+  let note = `${state.issues.length} issues read from ${state.repo}.`
+  let warn = false
+  state.sprints = []
+  if (state.project) {
+    try {
+      const board = await fetchProject()
+      state.issues = withProject(state.issues, board)
+      state.sprints = board.sprints
+      note += ` Sprints read from "${board.title}" (${board.sprints.length}).`
+    } catch (err) {
+      warn = true
+      note += ` Sprints not read: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+  state.readAt = Date.now()
+  publish()
+  emit<StatusHandler>('STATUS', { state: warn ? 'warn' : 'ok', text: note })
+}
+
 // Commands from the panel ----------------------------------------------------
 
-const fail = (err: unknown) => emit<StatusHandler>('STATUS', { state: 'error', text: err instanceof Error ? err.message : String(err) })
+const fail =(err: unknown) => emit<StatusHandler>('STATUS', { state: 'error', text: err instanceof Error ? err.message : String(err) })
 
 export default function () {
   on<ReadyHandler>('READY', () => {
@@ -388,7 +421,15 @@ export default function () {
       await loadSettings()
       publish()
       onSelectionChange()
+      // Once a repository is connected, it is read again at every opening,
+      // so the map shows GitHub's state without pressing anything.
+      if (state.repo) await compare()
     })().catch(fail)
+  })
+
+  on<SetGuideHandler>('SET_GUIDE', (change) => {
+    state.guide = { ...state.guide, ...change }
+    void figma.clientStorage.setAsync(fileKey('guide'), state.guide).then(publish).catch(fail)
   })
 
   on<RefreshHandler>('REFRESH', () => {
@@ -428,24 +469,7 @@ export default function () {
       await figma.clientStorage.setAsync('repo', state.repo)
       await figma.clientStorage.setAsync('project', state.project)
       if (token) await figma.clientStorage.setAsync('token', state.token)
-      emit<StatusHandler>('STATUS', { state: 'loading', text: `Reading issues of ${state.repo}…` })
-      state.issues = await fetchIssues()
-      let note = `${state.issues.length} issues read from ${state.repo}.`
-      let warn = false
-      state.sprints = []
-      if (state.project) {
-        try {
-          const board = await fetchProject()
-          state.issues = withProject(state.issues, board)
-          state.sprints = board.sprints
-          note += ` Sprints read from "${board.title}" (${board.sprints.length}).`
-        } catch (err) {
-          warn = true
-          note += ` Sprints not read: ${err instanceof Error ? err.message : String(err)}`
-        }
-      }
-      publish()
-      emit<StatusHandler>('STATUS', { state: warn ? 'warn' : 'ok', text: note })
+      await compare()
     })().catch(fail)
   })
 

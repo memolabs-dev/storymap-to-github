@@ -31,6 +31,7 @@ import type {
   RefreshHandler,
   ResizeWindowHandler,
   SelectedHandler,
+  SetGuideHandler,
   SetLabelsHandler,
   SetLegendHandler,
   SetModeHandler,
@@ -102,6 +103,104 @@ function sharedWords(title: string, stems: Array<string>): string {
   return [...new Set(words)].join(', ')
 }
 
+// How many map items could be issues, and how many already are.
+function linkProgress(board: BoardPayload) {
+  const b = board.backlog
+  const ids: Array<string> = []
+  const tasks = (list: Array<Task>) => list.forEach((t) => { ids.push(t.id); tasks(t.subtasks || []) })
+  const features = (list: Array<Feature>) => list.forEach((f) => { ids.push(f.id); tasks(f.tasks) })
+  b.epics.forEach((e) => { ids.push(e.id); features(e.features); tasks(e.tasks) })
+  features(b.looseFeatures)
+  const linked = ids.filter((id) => issueOf(board, id)).length
+  return { linked, total: ids.length }
+}
+
+// "just now", "3 min ago", "2 h ago".
+function ago(time: number, now: number) {
+  const minutes = Math.floor((now - time) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  return `${Math.floor(minutes / 60)} h ago`
+}
+
+// The getting started guide: four steps, each ticked by what happens on the
+// board or in the panel, never by a separate "done" button.
+function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) => void }) {
+  const { board } = props
+  const b = board.backlog
+  const progress = linkProgress(board)
+  const connected = board.settings.issuesLoaded !== null
+  const steps = [
+    {
+      title: 'Check how the board is read',
+      done: board.guide.readingConfirmed,
+      body: (
+        <Fragment>
+          <p class={styles.help}>
+            Read {b.mode === 'rows' ? "by rows, as in Figma's story map template" : 'by sticky colours'}: {b.stats.epics} epics, {b.stats.features} features, {b.stats.tasks} tasks
+            {b.milestones.length ? `, releases ${b.milestones.join(', ')}` : ', no releases'}.
+          </p>
+          <div class={styles.actions}>
+            <Button onClick={() => emit<SetGuideHandler>('SET_GUIDE', { readingConfirmed: true })}>That's right</Button>
+            <Button secondary onClick={() => props.goTo('Legend')}>Adjust</Button>
+          </div>
+        </Fragment>
+      ),
+    },
+    {
+      title: 'Connect GitHub',
+      done: connected,
+      body: connected ? (
+        <p class={styles.help}>Connected to {board.settings.repo}{board.readAt ? `, updated ${ago(board.readAt, props.now)}` : ''}.</p>
+      ) : (
+        <Fragment>
+          <p class={styles.help}>Name the repository where the team's issues live. The plugin reads them again every time it opens.</p>
+          <div class={styles.actions}><Button onClick={() => props.goTo('GitHub')}>Connect</Button></div>
+        </Fragment>
+      ),
+    },
+    {
+      title: 'Link your stickies to their issues',
+      done: connected && progress.total > 0 && progress.linked === progress.total,
+      body: (
+        <p class={styles.help}>
+          {connected ? `${progress.linked} of ${progress.total} linked. ` : ''}Click a sticky on the board: its card shows the issues it most likely is.
+        </p>
+      ),
+    },
+    {
+      title: 'Show labels on the board',
+      done: board.labelsOn,
+      body: connected ? (
+        <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>Labels on the board</Toggle>
+      ) : (
+        <p class={styles.help}>Once connected, each linked sticky can show its issue number, sprint and status.</p>
+      ),
+    },
+  ]
+  const current = steps.findIndex((s) => !s.done)
+  return (
+    <div class={styles.guide}>
+      <div class={styles.cardHead}>
+        <span class={styles.cardTitle}>Getting started</span>
+        <span class={styles.help}>{steps.filter((s) => s.done).length} of {steps.length}</span>
+        <button class={styles.close} onClick={() => emit<SetGuideHandler>('SET_GUIDE', { hidden: true })} aria-label="Hide the guide">✕</button>
+      </div>
+      <ol class={styles.steps4}>
+        {steps.map((s, i) => (
+          <li key={s.title} class={s.done ? styles.stepDone : i === current ? styles.stepCurrent : styles.stepLater}>
+            <span class={styles.stepMark}>{s.done ? '✓' : i + 1}</span>
+            <div class={styles.stepBody}>
+              <div class={styles.stepTitle}>{s.title}</div>
+              {i === current || (s.done && i === 1) ? s.body : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
   const m = props.board.matches[props.id]
   if (!m) return null
@@ -136,6 +235,13 @@ function Plugin() {
   const [token, setToken] = useState('')
   const [search, setSearch] = useState('')
   const [copied, setCopied] = useState('')
+  const [now, setNow] = useState(Date.now())
+
+  // Keeps "updated 3 min ago" true while the window stays open.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(timer)
+  }, [])
 
   useWindowResize((size) => emit<ResizeWindowHandler>('RESIZE_WINDOW', size), { minWidth: 360, minHeight: 480, maxWidth: 900, maxHeight: 1400 })
 
@@ -325,6 +431,7 @@ function Plugin() {
     const releases = ['all', ...b.milestones, ...(b.stats.withoutMilestone ? ['none'] : [])]
     return (
       <Fragment>
+        {!board.guide.hidden ? <Guide board={board} now={now} goTo={setTab} /> : null}
         {card()}
         {board.issues.length ? (
           <div style={{ margin: '8px 0' }}>
@@ -545,11 +652,23 @@ function Plugin() {
       <div class={styles.header}>
         <div class={styles.titleRow}>
           <span class={styles.title}>Storymap to GitHub</span>
+          {board.guide.hidden ? (
+            <Button
+              secondary
+              onClick={() => {
+                emit<SetGuideHandler>('SET_GUIDE', { hidden: false })
+                setTab('Preview')
+              }}
+            >
+              Guide
+            </Button>
+          ) : null}
           <Button secondary onClick={() => emit<RefreshHandler>('REFRESH')}>Refresh</Button>
         </div>
         <div class={styles.scope}>
           Reading page <b>{board.page}</b>
-          {board.settings.issuesLoaded !== null ? ` · compared with ${board.settings.issuesLoaded} issues of ${board.settings.repo}` : ''}
+          {board.settings.issuesLoaded !== null ? ` · ${board.settings.issuesLoaded} issues of ${board.settings.repo}` : ' · not connected to GitHub'}
+          {board.readAt ? `, updated ${ago(board.readAt, now)}` : ''}
         </div>
       </div>
       <Tabs

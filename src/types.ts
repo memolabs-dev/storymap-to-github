@@ -27,6 +27,9 @@ export interface BoardPayload {
   nodeTypes: Record<string, number>
   markdown: string
   labelsOn: boolean
+  guide: Guide
+  // When GitHub was last read, in milliseconds since 1970; null if never.
+  readAt: number | null
   settings: {
     repo: string
     project: string
@@ -34,6 +37,13 @@ export interface BoardPayload {
     hasToken: boolean
     issuesLoaded: number | null
   }
+}
+
+// The getting started guide of one board: whether the team confirmed how
+// the board is read, and whether the guide is put away.
+export interface Guide {
+  readingConfirmed: boolean
+  hidden: boolean
 }
 
 export interface StatusPayload {
@@ -103,6 +113,10 @@ export interface LinkHandler extends EventHandler {
 export interface ForgetTokenHandler extends EventHandler {
   name: 'FORGET_TOKEN'
   handler: () => void
+}
+export interface SetGuideHandler extends EventHandler {
+  name: 'SET_GUIDE'
+  handler: (change: Partial<Guide>) => void
 }
 export interface SetLabelsHandler extends EventHandler {
   name: 'SET_LABELS'
