@@ -210,6 +210,15 @@ export declare function similarity(a: string, b: string, loose?: boolean): numbe
 export declare function matchIssues(backlog: Backlog, issues: Array<Issue>, links?: Record<string, number>): Matches
 export declare function allItems(backlog: Backlog): Array<{ item: MapNode & Partial<Task>; kind: 'epic' | 'feature' | 'task' }>
 export declare function sameRelease(a: string | null | undefined, b: string | null | undefined): boolean
+export type Snapshot = Record<string, Record<string, string | null>>
+export interface Moved {
+  number: number
+  title: string
+  kind: 'new' | 'closed' | 'reopened' | 'changed'
+  changes: Array<{ field: string; from: string; to: string }>
+}
+export declare function snapshotOf(issues: Array<Issue>): Snapshot
+export declare function changesSince(snapshot: Snapshot, issues: Array<Issue>): Array<Moved>
 export declare function publishOrder(backlog: Backlog, ids: Array<string>): Array<string>
 export declare function driftKey(drift: Drift): string
 export declare function findDrift(backlog: Backlog, issues: Array<Issue>, matches: Matches, kept?: Record<string, Array<string>>): DriftReport

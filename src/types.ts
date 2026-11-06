@@ -2,7 +2,7 @@
 // typed style of Create Figma Plugin's `emit` and `on`.
 import { EventHandler } from '@create-figma-plugin/utilities'
 
-import type { Backlog, DriftReport, ItemType, Matches, PaletteEntry, Publishing, ReadingMode, RepoMeta, Sprint } from './core'
+import type { Backlog, DriftReport, ItemType, Matches, Moved, PaletteEntry, Publishing, ReadingMode, RepoMeta, Sprint } from './core'
 
 export interface IssueSummary {
   number: number
@@ -28,6 +28,9 @@ export interface BoardPayload {
   markdown: string
   labelsOn: boolean
   guide: Guide
+  // What moved since the team marked the start of the week, or null when
+  // no week was started for this repository.
+  week: { at: string; moved: Array<Moved> } | null
   // When GitHub was last read, in milliseconds since 1970; null if never.
   readAt: number | null
   settings: {
@@ -208,6 +211,10 @@ export interface ResolveHandler extends EventHandler {
 export interface PublishManyHandler extends EventHandler {
   name: 'PUBLISH_MANY'
   handler: (ids: Array<string>) => void
+}
+export interface StartWeekHandler extends EventHandler {
+  name: 'START_WEEK'
+  handler: () => void
 }
 export interface ResizeWindowHandler extends EventHandler {
   name: 'RESIZE_WINDOW'

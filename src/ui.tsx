@@ -50,6 +50,7 @@ import type {
   PublishManyHandler,
   ResolveHandler,
   SetSizeHandler,
+  StartWeekHandler,
   ReadyHandler,
   RefreshHandler,
   ResizeWindowHandler,
@@ -276,7 +277,7 @@ function Plugin() {
   const [resolving, setResolving] = useState<string | null>(null)
   // The batch to publish: ticked stickies, by id; unset means the default.
   const [picked, setPicked] = useState<Record<string, boolean>>({})
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ drifts: true })
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ drifts: true, week: true })
   const [startLabel, setStartLabel] = useState<string | null>(null)
   const [startStatus, setStartStatus] = useState<string | null>(null)
 
@@ -745,6 +746,59 @@ function Plugin() {
     )
   }
 
+  // What moved since the team started the week: new, closed and changed
+  // issues, with each field before and after, for the weekly.
+  const KIND_MOVED: Record<string, string> = { new: 'New', closed: 'Closed', reopened: 'Reopened', changed: 'Changed' }
+  const week = () => {
+    const w = board.week
+    const start = () => {
+      setResolving('week')
+      emit<StartWeekHandler>('START_WEEK')
+    }
+    if (!w) {
+      return (
+        <div class={styles.weekStart}>
+          <p class={styles.question}>What moved this week?</p>
+          <p class={styles.help}>Mark the start of the week, at the weekly for example: from then on, the issues that are created, closed or change status, sprint, size or title show here, for the whole team.</p>
+          <div class={styles.actions}><Button secondary onClick={start}>Start the week now</Button></div>
+        </div>
+      )
+    }
+    const since = new Date(w.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    const stickyOf = (number: number) => Object.keys(board.matches).find((id) => issueOf(board, id) && issueOf(board, id)!.number === number)
+    return (
+      <Disclosure
+        open={Boolean(openSections.week)}
+        onClick={() => toggleSection('week')}
+        title={`Since ${since} · ${w.moved.length ? `${w.moved.length} ${w.moved.length === 1 ? 'issue moved' : 'issues moved'}` : 'nothing moved'}`}
+      >
+        {w.moved.map((m) => {
+          const sticky = stickyOf(m.number)
+          const url = board.issues.find((i) => i.number === m.number)?.url
+          return (
+            <div class={styles.moved} key={m.number}>
+              <div class={styles.driftHead}>
+                <span class={`${styles.pill} ${m.kind === 'new' ? styles.pillNew : m.kind === 'changed' ? styles.pillMilestone : styles.pillMaybe}`}>{KIND_MOVED[m.kind]}</span>
+                <button class={`${styles.linkButton} ${styles.label}`} onClick={() => (sticky ? open(sticky) : url && emit<OpenHandler>('OPEN', url))} title={sticky ? 'Show its sticky' : 'Not on the map: open on GitHub'}>
+                  #{m.number} {m.title}
+                </button>
+              </div>
+              {m.changes.map((c) => (
+                <div class={styles.movedChange} key={c.field}>
+                  <span class={styles.driftSide}>{c.field}</span>
+                  <span>{c.from} → {c.to}</span>
+                </div>
+              ))}
+            </div>
+          )
+        })}
+        <div class={styles.actions}>
+          <Button secondary onClick={start} title="Compare against this moment from now on">Start a new week</Button>
+        </div>
+      </Disclosure>
+    )
+  }
+
   const toggleSection = (key: string) => setOpenSections((o) => ({ ...o, [key]: !o[key] }))
 
   const drift = () => {
@@ -762,6 +816,7 @@ function Plugin() {
     return (
       <Fragment>
         {resolving && status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
+        {week()}
         {d.drifts.length ? (
           <p class={styles.lead}>{d.drifts.length === 1 ? 'One place' : `${d.drifts.length} places`} where the map and GitHub disagree. Pick which side is right; nothing changes until you do.</p>
         ) : (

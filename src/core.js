@@ -833,8 +833,63 @@ function publishOrder(backlog, ids) {
     .map((x) => x.id);
 }
 
+// What moved since the week started. The snapshot keeps, for each issue, the
+// fields a weekly looks at, including the board's (status, sprint, size),
+// which GitHub's issue history does not record.
+const WATCHED = [
+  ['title', 'Title'],
+  ['milestone', 'Milestone'],
+  ['status', 'Status'],
+  ['sprint', 'Sprint'],
+  ['size', 'Size'],
+  ['assignees', 'Assignees'],
+];
+
+function snapshotOf(issues) {
+  const snap = {};
+  for (const i of issues) {
+    snap[i.number] = {
+      title: i.title,
+      state: i.state || 'open',
+      milestone: i.milestone || null,
+      status: i.status || null,
+      sprint: i.sprint ? (typeof i.sprint === 'string' ? i.sprint : i.sprint.title) : null,
+      size: i.size || null,
+      assignees: (i.assignees || []).map((a) => `@${a}`).join(', ') || null,
+    };
+  }
+  return snap;
+}
+
+// Returns [{ number, title, kind: 'new' | 'closed' | 'reopened' | 'changed',
+// changes: [{ field, from, to }] }], new issues first, then closed or
+// reopened ones, then the others.
+function changesSince(snapshot, issues) {
+  const now = snapshotOf(issues);
+  const order = { new: 0, closed: 1, reopened: 1, changed: 2 };
+  const moved = [];
+  for (const [n, after] of Object.entries(now)) {
+    const number = Number(n);
+    const before = snapshot[n];
+    if (!before) {
+      moved.push({ number, title: after.title, kind: 'new', changes: [] });
+      continue;
+    }
+    const changes = WATCHED.filter(([key]) => (before[key] || null) !== (after[key] || null)).map(([key, field]) => ({
+      field,
+      from: before[key] || 'None',
+      to: after[key] || 'None',
+    }));
+    const kind = before.state !== after.state ? (after.state === 'closed' ? 'closed' : 'reopened') : changes.length ? 'changed' : null;
+    if (kind) moved.push({ number, title: after.title, kind, changes });
+  }
+  return moved.sort((a, b) => order[a.kind] - order[b.kind] || b.number - a.number);
+}
+
 export {
   DEFAULT_BODY,
+  snapshotOf,
+  changesSince,
   publishOrder,
   driftKey,
   draftIssue,

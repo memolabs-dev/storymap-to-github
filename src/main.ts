@@ -7,8 +7,10 @@ import {
   LEGEND_PATTERN,
   buildBacklog,
   buildPalette,
+  changesSince,
   defaultLegend,
   draftIssue,
+  snapshotOf,
   driftKey,
   publishOrder,
   sameRelease,
@@ -42,6 +44,7 @@ import type {
   PublishManyHandler,
   ResolveHandler,
   SetSizeHandler,
+  StartWeekHandler,
   ReadyHandler,
   RefreshHandler,
   ResizeWindowHandler,
@@ -215,6 +218,25 @@ function writeLink(id: string, number: number | null) {
   else state.links[id] = number
 }
 
+// The start of the week: a snapshot of the issues, kept in the file per
+// repository so the whole team compares against the same moment.
+const weekKey = () => `week:${state.repo.toLowerCase()}`
+
+function readWeek() {
+  if (!state.repo || !state.issues) return null
+  const raw = figma.root.getPluginData(weekKey())
+  if (!raw) return null
+  const week = JSON.parse(raw) as { at: string; snapshot: Record<string, Record<string, string | null>> }
+  return { at: week.at, moved: changesSince(week.snapshot, state.issues) }
+}
+
+function startWeek() {
+  if (!state.repo || !state.issues) throw new Error('Connect a repository first.')
+  figma.root.setPluginData(weekKey(), JSON.stringify({ at: new Date().toISOString(), snapshot: snapshotOf(state.issues) }))
+  publish()
+  emit<StatusHandler>('STATUS', { state: 'ok', text: 'A new week starts now: changes from here on show in Differences.' })
+}
+
 // Differences the team keeps on purpose, on each sticky and per repository,
 // so the whole team stops seeing them; one comes back when either side changes.
 const keptKey = () => `kept:${state.repo.toLowerCase()}`
@@ -380,6 +402,7 @@ function publish() {
     markdown: toMarkdown(state.backlog, state.matches),
     labelsOn: state.labelsOn,
     guide: state.guide,
+    week: readWeek(),
     readAt: state.readAt,
     settings: {
       repo: state.repo,
@@ -1072,6 +1095,14 @@ export default function () {
     if (!state.repo) return
     state.publishing = { ...state.publishing, ...change }
     void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
+  })
+
+  on<StartWeekHandler>('START_WEEK', () => {
+    try {
+      startWeek()
+    } catch (err) {
+      fail(err)
+    }
   })
 
   on<ResolveHandler>('RESOLVE', (id, key, side) => {

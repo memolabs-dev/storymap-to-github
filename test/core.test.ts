@@ -466,3 +466,28 @@ test('a batch is published parents first, so each issue finds its parent', () =>
   assert.deepEqual(order, ['Catalogue', 'Borrowing', 'Reserve a book', 'Reservation calendar']);
   assert.deepEqual(core.publishOrder(b, ['not-on-the-map']), [], 'unknown ids are dropped');
 });
+
+test('what moved since the week started: new, closed, and changed issues with before and after', () => {
+  const before = [
+    { number: 3, title: 'Import books', state: 'open', milestone: 'P1', status: 'Backlog', sprint: null, size: 'S', assignees: [] },
+    { number: 7, title: 'Search', state: 'open', milestone: 'P0', status: 'In progress', sprint: { title: 'Sprint 1' }, size: 'M', assignees: ['ana'] },
+    { number: 9, title: 'Old idea', state: 'open', milestone: null, status: 'Backlog', size: null, assignees: [] },
+  ];
+  const snapshot = core.snapshotOf(before);
+  const now = [
+    { number: 3, title: 'Import books from a spreadsheet', state: 'open', milestone: 'P1', status: 'Ready', sprint: { title: 'Sprint 2' }, size: 'S', assignees: ['tom'] },
+    { number: 7, title: 'Search', state: 'closed', milestone: 'P0', status: 'Done', sprint: { title: 'Sprint 1' }, size: 'M', assignees: ['ana'] },
+    { number: 9, title: 'Old idea', state: 'open', milestone: null, status: 'Backlog', size: null, assignees: [] },
+    { number: 12, title: 'Reservation calendar', state: 'open', milestone: 'P0', status: 'Backlog', size: null, assignees: [] },
+  ];
+  const moved = core.changesSince(snapshot, now);
+  assert.deepEqual(moved.map((m) => [m.number, m.kind]), [[12, 'new'], [7, 'closed'], [3, 'changed']]);
+  const three = moved.find((m) => m.number === 3);
+  assert.deepEqual(three.changes, [
+    { field: 'Title', from: 'Import books', to: 'Import books from a spreadsheet' },
+    { field: 'Status', from: 'Backlog', to: 'Ready' },
+    { field: 'Sprint', from: 'None', to: 'Sprint 2' },
+    { field: 'Assignees', from: 'None', to: '@tom' },
+  ]);
+  assert.equal(core.changesSince(snapshot, before).length, 0, 'nothing moved');
+});
