@@ -28,7 +28,7 @@
     "editorType": [
       "figjam"
     ],
-    "id": "storymap-to-github-dev",
+    "id": "1700578330370541842",
     "name": "Storymap to GitHub",
     "main": "src/main.ts",
     "ui": "src/ui.tsx",
