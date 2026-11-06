@@ -696,7 +696,7 @@ function Plugin() {
         <span class={styles.fieldLabel}>Token (optional)</span>
         <Textbox value={token} onValueInput={setToken} password placeholder={board.settings.hasToken ? 'Saved on this computer' : 'Needed for sprints or a private repository'} />
       </div>
-      <p class={styles.help}>Sprints need a token that can read projects (classic token: read:project, and repo for a private repository). Publishing needs repo and project. The token stays on this computer.</p>
+      <p class={styles.help}>Sprints need a token that can read projects (classic token: read:project, and repo for a private repository). Publishing needs repo and project, and read:org to see every issue type of an organisation. The token stays on this computer.</p>
       <div class={styles.actions}>
         <Button
           onClick={() => {
@@ -779,7 +779,10 @@ function Plugin() {
       />
       <div class={styles.main}>{tabContent[tab]()}</div>
       <div class={styles.footer}>
-        <span class={styles.footerNote}>Nothing is written to GitHub.{board.labelsOn ? ' Labels on the board are on.' : ''}</span>
+        <span class={styles.footerNote}>
+          {board.settings.writeAllowed ? `Changes to ${board.settings.repo} allowed.` : 'Nothing is written to GitHub.'}
+          {board.labelsOn ? ' Labels on the board are on.' : ''}
+        </span>
         <Button
           secondary
           onClick={() => {

@@ -564,6 +564,9 @@ async function compare() {
   emit<StatusHandler>('STATUS', { state: 'loading', text: `Reading issues of ${state.repo}…` })
   state.issues = await fetchIssues()
   state.meta = await fetchMeta()
+  // Listing the owner's issue types needs read:org; the types the issues
+  // already use are known without it.
+  for (const i of state.issues) if (i.type && !state.meta.types.includes(i.type)) state.meta.types.push(i.type)
   let note = `${state.issues.length} issues read from ${state.repo}.`
   let warn = false
   state.sprints = []
