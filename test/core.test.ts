@@ -458,3 +458,11 @@ test('each difference says what the map wants, and one kept on purpose stays awa
   const renamedAgain = issues.map((i) => (i.number === 19 ? { ...i, title: 'Back-office v2' } : i));
   assert.ok(core.findDrift(b, renamedAgain, matches, kept).drifts.some((x) => x.kind === 'title'), 'back when GitHub changes again');
 });
+
+test('a batch is published parents first, so each issue finds its parent', () => {
+  const b = core.buildBacklog(board(), legend);
+  const ids = ['Reservation calendar', 'Borrowing', 'Reserve a book', 'Catalogue'].map((t) => find(b, t).id);
+  const order = core.publishOrder(b, ids).map((id) => core.allItems(b).find((x) => x.item.id === id).item.title);
+  assert.deepEqual(order, ['Catalogue', 'Borrowing', 'Reserve a book', 'Reservation calendar']);
+  assert.deepEqual(core.publishOrder(b, ['not-on-the-map']), [], 'unknown ids are dropped');
+});

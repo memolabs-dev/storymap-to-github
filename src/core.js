@@ -820,8 +820,22 @@ function draftIssue(id, backlog, matches, repo, publishing) {
   return { id, kind, title: item.title, body, type, labels, parent, milestone, status: publishing.startStatus || null, warnings };
 }
 
+// The order to publish a batch in: epics, then features, then tasks, a task
+// before its sub-tasks, so each new issue can be put under a parent that
+// already exists. Ids that are not on the map are dropped.
+function publishOrder(backlog, ids) {
+  const wanted = new Set(ids);
+  const rank = { epic: 0, feature: 1, task: 2 };
+  return allItems(backlog)
+    .map((x, index) => ({ id: x.item.id, rank: rank[x.kind], index }))
+    .filter((x) => wanted.has(x.id))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((x) => x.id);
+}
+
 export {
   DEFAULT_BODY,
+  publishOrder,
   driftKey,
   draftIssue,
   TYPES, LEGEND_PATTERN, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows,

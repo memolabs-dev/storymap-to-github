@@ -3,6 +3,7 @@
 // sticky, where the map and GitHub drift apart, and the reading settings.
 import {
   Button,
+  Checkbox,
   Disclosure,
   Dropdown,
   IconButton,
@@ -46,6 +47,7 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  PublishManyHandler,
   ResolveHandler,
   SetSizeHandler,
   ReadyHandler,
@@ -272,6 +274,8 @@ function Plugin() {
   const [useToken, setUseToken] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
   const [resolving, setResolving] = useState<string | null>(null)
+  // The batch to publish: ticked stickies, by id; unset means the default.
+  const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ drifts: true })
   const [startLabel, setStartLabel] = useState<string | null>(null)
   const [startStatus, setStartStatus] = useState<string | null>(null)
@@ -672,6 +676,75 @@ function Plugin() {
     )
   }
 
+  // Publishing a batch: every sticky with no issue, to tick one by one or
+  // all at once, except those that look like an issue that already exists.
+  const batch = (items: Array<{ id: string; title: string; kind: string }>) => {
+    const s = board.settings
+    const publishable = items.filter((i) => i.kind === 'epic' || i.kind === 'feature' || i.kind === 'task')
+    const lookalike = (i: { title: string; kind: string }) => {
+      const best = suggestIssues(i.title, i.kind, board.issues.map((x) => ({ number: x.number, title: x.title })), 1)[0]
+      return best && best.score >= 0.3 ? best : null
+    }
+    // Nothing is ticked at first: an issue is hard to take back.
+    const ticked = (i: { id: string; title: string; kind: string }) => Boolean(picked[i.id])
+    const chosen = publishable.filter(ticked)
+    const busy = status !== null && status.state === 'loading'
+    const row = (i: { id: string; title: string; kind: string }) => {
+      const like = lookalike(i)
+      return (
+        <div class={styles.row} key={i.id} onMouseEnter={() => focus(i.id, false)}>
+          <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
+          {s.writeAllowed && publishable.includes(i) ? (
+            <span class={styles.label}>
+              <Checkbox value={ticked(i)} onValueChange={(v: boolean) => setPicked((p) => ({ ...p, [i.id]: v }))}>
+                {i.title}
+              </Checkbox>
+            </span>
+          ) : (
+            <button class={`${styles.rowLink} ${styles.label}`} onClick={() => open(i.id)}>{i.title}</button>
+          )}
+          {like ? (
+            <button class={`${styles.pill} ${styles.pillMaybe}`} title={`Looks like #${like.number} ${like.title}. Open the card to link it.`} onClick={() => open(i.id)}>
+              #{like.number}?
+            </button>
+          ) : null}
+        </div>
+      )
+    }
+    if (!s.writeAllowed) {
+      return (
+        <Fragment>
+          <p class={styles.help}>To create these as issues in one go, choose Can write in GitHub.</p>
+          {items.map(row)}
+        </Fragment>
+      )
+    }
+    return (
+      <Fragment>
+        <p class={styles.help}>
+          Tick the stickies to create as issues: they are created parents first, each with the repository's issue text. The ones marked #? look like an issue that exists: open their card to link them instead.
+        </p>
+        <div class={styles.actions} style={{ marginBottom: 6 }}>
+          <Button
+            disabled={busy || !chosen.length}
+            onClick={() => {
+              setResolving('batch')
+              emit<PublishManyHandler>('PUBLISH_MANY', chosen.map((i) => i.id))
+              setPicked({})
+            }}
+          >
+            {chosen.length === 1 ? 'Create 1 issue' : `Create ${chosen.length} issues`}
+          </Button>
+          <Button secondary onClick={() => setPicked(Object.fromEntries(publishable.map((i) => [i.id, !lookalike(i)])))} title="Ticks every sticky that looks like no existing issue">
+            Tick the new ones
+          </Button>
+          <Button secondary onClick={() => setPicked(Object.fromEntries(publishable.map((i) => [i.id, false])))}>Tick none</Button>
+        </div>
+        {items.map(row)}
+      </Fragment>
+    )
+  }
+
   const toggleSection = (key: string) => setOpenSections((o) => ({ ...o, [key]: !o[key] }))
 
   const drift = () => {
@@ -744,12 +817,7 @@ function Plugin() {
         ) : null}
         {d.onlyOnBoard.length ? (
           <Disclosure open={Boolean(openSections.board)} onClick={() => toggleSection('board')} title={`On the map only · ${d.onlyOnBoard.length}`}>
-            {d.onlyOnBoard.map((i) => (
-              <div class={styles.row} key={i.id} onClick={() => open(i.id)} onMouseEnter={() => focus(i.id, false)}>
-                <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
-                <span class={styles.label}>{i.title}</span>
-              </div>
-            ))}
+            {batch(d.onlyOnBoard)}
           </Disclosure>
         ) : null}
         {d.onlyOnGitHub.length ? (

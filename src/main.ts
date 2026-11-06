@@ -10,6 +10,7 @@ import {
   defaultLegend,
   draftIssue,
   driftKey,
+  publishOrder,
   sameRelease,
   explainEvents,
   findDrift,
@@ -38,6 +39,7 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  PublishManyHandler,
   ResolveHandler,
   SetSizeHandler,
   ReadyHandler,
@@ -573,7 +575,7 @@ async function setSize(number: number, size: string | null) {
 // Publishes one sticky as an issue: the issue, its place under its parent,
 // the project board, then the link on the sticky. Only when the team allowed
 // writing to this repository.
-async function publishSticky(id: string, title: string, text: string) {
+async function createIssue(id: string, title: string, text: string): Promise<{ issue: Issue; note: string; problems: Array<string> }> {
   if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
   if (!state.token) throw new Error('Publishing needs a token that can write issues.')
   if (!state.backlog || !state.meta) throw new Error('Compare with GitHub first.')
@@ -616,15 +618,57 @@ async function publishSticky(id: string, title: string, text: string) {
       problems.push(`not added to the board (${err instanceof Error ? err.message : String(err)})`)
     }
   }
-  // Read GitHub again, so the tree, the labels and drift show the new issue.
-  // GitHub's issue list can lag by a minute, so the new issue is added if
-  // the list does not have it yet: the card then shows it, not the form.
+  // The plugin knows the new issue at once, so the next sticky of a batch
+  // finds it as its parent and the card shows it instead of the form.
+  const issue: Issue = { ...toIssue(made), parent: draft.parent ? draft.parent.number : null, status: draft.status || undefined }
+  if (state.issues) state.issues.push(issue)
+  publish()
+  return { issue, note, problems }
+}
+
+// Reads GitHub again after creating issues. GitHub's issue list can lag by
+// a minute, so the issues just created are kept if the list misses them.
+async function refreshAfter(created: Array<Issue>) {
   await compare()
-  if (state.issues && !state.issues.some((i) => i.number === made.number)) {
-    state.issues.push({ ...toIssue(made), parent: draft.parent ? draft.parent.number : null, status: draft.status || undefined })
+  const missing = created.filter((c) => state.issues && !state.issues.some((i) => i.number === c.number))
+  if (missing.length && state.issues) {
+    state.issues.push(...missing)
     publish()
   }
+}
+
+async function publishSticky(id: string, title: string, text: string) {
+  const { issue, note, problems } = await createIssue(id, title, text)
+  await refreshAfter([issue])
   emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? `${note} But ${problems.join(', ')}.` : note })
+}
+
+// Publishes a batch the team reviewed, parents first, one at a time; stops
+// at the first issue GitHub refuses and says what was created.
+async function publishMany(ids: Array<string>) {
+  if (!state.backlog) return
+  const order = publishOrder(state.backlog, ids)
+  const created: Array<Issue> = []
+  const problems: Array<string> = []
+  try {
+    for (const [n, id] of order.entries()) {
+      emit<StatusHandler>('STATUS', { state: 'loading', text: `Creating ${n + 1} of ${order.length}…` })
+      const result = await createIssue(id, '', '')
+      created.push(result.issue)
+      problems.push(...result.problems.map((p) => `#${result.issue.number} ${p}`))
+    }
+  } catch (err) {
+    await refreshAfter(created)
+    const done = created.length ? `${created.length} created (${created.map((i) => `#${i.number}`).join(', ')}), then s` : 'S'
+    emit<StatusHandler>('STATUS', { state: 'error', text: `${done}topped: ${err instanceof Error ? err.message : String(err)}` })
+    return
+  }
+  await refreshAfter(created)
+  const list = created.map((i) => `#${i.number}`).join(', ')
+  emit<StatusHandler>('STATUS', {
+    state: problems.length ? 'warn' : 'ok',
+    text: `${created.length} issues created: ${list}.${problems.length ? ` But ${problems.join('; ')}.` : ''}`,
+  })
 }
 
 const withProject = (issues: Array<Issue>, project: ProjectBoard): Array<Issue> =>
@@ -1036,6 +1080,10 @@ export default function () {
 
   on<SetSizeHandler>('SET_SIZE', (number, size) => {
     void setSize(number, size).catch(fail)
+  })
+
+  on<PublishManyHandler>('PUBLISH_MANY', (ids) => {
+    void publishMany(ids).catch(fail)
   })
 
   on<PublishHandler>('PUBLISH', (id, title, body) => {

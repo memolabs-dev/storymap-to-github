@@ -205,6 +205,10 @@ export interface ResolveHandler extends EventHandler {
   name: 'RESOLVE'
   handler: (id: string, key: string, side: 'map' | 'github' | 'keep') => void
 }
+export interface PublishManyHandler extends EventHandler {
+  name: 'PUBLISH_MANY'
+  handler: (ids: Array<string>) => void
+}
 export interface ResizeWindowHandler extends EventHandler {
   name: 'RESIZE_WINDOW'
   handler: (windowSize: { width: number; height: number }) => void

@@ -14,7 +14,7 @@ Each story is checked in Figma on a copy of a board, against a test repository. 
 | 6 | know where the map and GitHub disagree, and who changed what | the weekly starts from facts | Done: Differences and "Why?" |
 | 7 | rename the issue when the map is right | titles stay in the words of the map | Done: each difference offers "the map is right" (rename the issue, set its milestone, move it under its parent), "Rename the sticky" for a title, and "Keep both", which hides it until either side changes |
 | 8 | not change the tech lead's fields by mistake | each role keeps its fields | Not started (roles) |
-| 9 | publish a batch of stickies after reviewing them | a new release becomes issues in one go | Not started |
+| 9 | publish a batch of stickies after reviewing them | a new release becomes issues in one go | Done: Differences, "On the map only", tick the stickies (none ticked at first; "Tick the new ones" leaves out those that look like an existing issue), then "Create N issues", parents first |
 | 10 | see what moved since last week | the weekly is quick | Not started |
 | 11 | start a new map with a guided template | a new team gets going without help | Partly: the guide helps on an existing board; the template is not created |
 

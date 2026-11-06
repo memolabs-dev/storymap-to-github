@@ -29,6 +29,8 @@ In the GitHub tab, press **Connect with GitHub**: the plugin shows a short code,
 
 **Publishing a sticky.** The card of a sticky that is not on GitHub yet shows the issue it would become: its title, which you can edit, its type, its parent, its milestone from the release row, its labels, and its status on the project board. Then "Create the issue" creates it, makes it a sub-issue of its parent, adds it to the board and links the sticky. Nothing is written until the team turns on "Allow changes to owner/repo" in the GitHub tab, which is off for every repository by default. The label and status a new issue starts with are set there too, for each repository (by default `needs-refinement` and `Backlog`). If the owner has no issue type for an epic, feature or task, a label of that name stands in for it. A sticky whose parent is not on GitHub yet is published without a parent, and the preview says so.
 
+**Publishing a batch.** In Differences, "On the map only" lists the stickies with no issue, each with a box to tick. Nothing is ticked at first; "Tick the new ones" ticks every sticky that looks like no existing issue, and the ones marked `#19?` should be linked from their card instead. "Create N issues" creates them parents first, so a feature lands under its new epic and a sub-task under its new task, and reads GitHub once at the end.
+
 **Labels on the board.** Once a repository is compared, the "Labels on the board" switch puts a small locked label in the corner of every linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves, are updated on every read, and all go away when the switch is turned off. Labels and links are written on the board only.
 
 ## Drift: where the map and GitHub disagree
