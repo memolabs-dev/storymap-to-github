@@ -151,6 +151,9 @@ function linkProgress(board: BoardPayload) {
   return { linked, total: ids.length }
 }
 
+// "1 epic", "3 epics".
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
 // "just now", "3 min ago", "2 h ago".
 function ago(time: number, now: number) {
   const minutes = Math.floor((now - time) / 60000)
@@ -173,7 +176,7 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
       body: (
         <Fragment>
           <p class={styles.help}>
-            Read {b.mode === 'rows' ? "by rows, as in Figma's story map template" : 'by sticky colours'}: {b.stats.epics} epics, {b.stats.features} features, {b.stats.tasks} tasks
+            Read {b.mode === 'rows' ? "by rows, as in Figma's story map template" : 'by sticky colours'}: {count(b.stats.epics, 'epic', 'epics')}, {count(b.stats.features, 'feature', 'features')}, {count(b.stats.tasks, 'task', 'tasks')}
             {b.milestones.length ? `, releases ${b.milestones.join(', ')}` : ', no releases'}.
           </p>
           <div class={styles.actions}>
@@ -407,7 +410,7 @@ function Plugin() {
             <span class={styles.cardTitle}>Not part of the map</span>
             <button class={styles.close} onClick={() => setSelected(null)} aria-label="Close">✕</button>
           </div>
-          <p class={styles.help}>This node is a label, a legend sticky, or a colour or row the map ignores. Change that in Legend.</p>
+          <p class={styles.help}>This node is a label, a legend sticky, or a colour or row the map ignores. Change that in Reading.</p>
         </div>
       )
     }
@@ -583,7 +586,7 @@ function Plugin() {
         <div class={styles.overview}>
           <div class={styles.overviewLine}>
             <span>
-              {b.stats.epics} epics · {b.stats.features} features · {b.stats.tasks} tasks
+              {count(b.stats.epics, 'epic', 'epics')} · {count(b.stats.features, 'feature', 'features')} · {count(b.stats.tasks, 'task', 'tasks')}
             </span>
             {board.issues.length ? (
               <span class={styles.inlineToggle} title="Show each linked sticky's issue, sprint and status on the board">
@@ -1195,7 +1198,7 @@ function Plugin() {
             )}
           </div>
           <div class={styles.scope}>
-            Page {board.page}
+            {/^page\b/i.test(board.page) ? board.page : `Page ${board.page}`}
             {board.settings.issuesLoaded !== null ? ` · ${board.settings.issuesLoaded} issues` : ''}
             {board.readAt ? ` · updated ${ago(board.readAt, now)}` : ''}
           </div>
