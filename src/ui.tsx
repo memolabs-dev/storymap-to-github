@@ -988,11 +988,22 @@ function Plugin() {
 
   const legend = () => {
     const byRows = b.mode === 'rows'
-    // Figma's node types, such as "12 sticky, 3 text"; the usual ones are translated.
-    const types = Object.entries(board.nodeTypes)
-      .sort((x, y) => y[1] - x[1])
-      .map(([type, c]) => `${c} ${t(type.toLowerCase().replace(/_/g, ' '), undefined, 'node')}`)
-      .join(', ')
+    // What the page holds, such as "12 stickies, 3 sections, 400 other elements".
+    const named: Record<string, [string, string]> = {
+      STICKY: ['{n} sticky', '{n} stickies'],
+      SHAPE_WITH_TEXT: ['{n} shape with text', '{n} shapes with text'],
+      SECTION: ['{n} section', '{n} sections'],
+      CONNECTOR: ['{n} connector', '{n} connectors'],
+      TEXT: ['{n} text', '{n} texts'],
+    }
+    const counts = Object.entries(board.nodeTypes)
+    const others = counts.filter(([type]) => !named[type]).reduce((sum, [, c]) => sum + c, 0)
+    const types = [
+      ...Object.keys(named)
+        .filter((type) => board.nodeTypes[type])
+        .map((type) => plural(board.nodeTypes[type], ...named[type])),
+      ...(others ? [plural(others, '{n} other element', '{n} other elements')] : []),
+    ].join(', ')
     return (
       <Fragment>
         <div style={{ margin: '12px 0 8px' }}>

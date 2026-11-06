@@ -37,7 +37,7 @@ The plugin speaks the language of your system, English or French. To change it: 
 
 On an empty page, the plugin offers **Add a story map template**: the rows of Figma's story map template (User Persona, Activities, Tasks, Release 1, Release 2), each with an example sticky.
 
-![The starting template, read by the plugin](images/start-template.jpg)
+![The starting template, read by the plugin](images/en/start-template.jpg)
 
 ### 3. Connect GitHub
 
@@ -49,7 +49,7 @@ In the **GitHub** tab:
 4. **Your role.** Product manager, tech lead, or everyone. The plugin then only offers the changes of your role.
 5. **Read only or Can write.** Every repository starts in read only. Choose Can write when you want to create issues, set sizes or settle differences from the plugin.
 
-![The GitHub tab once connected](images/github-setup.jpg)
+![The GitHub tab once connected](images/en/github-setup.jpg)
 
 **If your organization restricts OAuth apps**, GitHub asks an owner of the organization to approve Storymap to GitHub before the plugin can see its private repositories. The owner does it in the organization's settings, under **Third-party access**.
 

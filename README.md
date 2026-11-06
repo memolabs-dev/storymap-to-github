@@ -2,7 +2,7 @@
 
 A FigJam plugin for teams that plan in a story map and build in GitHub. It reads the map as the backlog it is, or will become: epics, features with their steps, tasks, releases. Then it keeps the two in step, from the board: create the issues, see where the map and GitHub disagree, settle it in one click, and see what moved this week.
 
-![The plugin next to a story map: the map as a backlog, and the link to GitHub](docs/images/map-tree.jpg)
+![The plugin next to a story map: the map as a backlog, and the link to GitHub](docs/images/en/board-labels.jpg)
 
 ## Why
 

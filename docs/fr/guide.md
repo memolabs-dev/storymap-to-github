@@ -38,17 +38,21 @@ L'arbre montre les épopées, les fonctionnalités avec leurs étapes, les tâch
 - `#19?` en orange : l'issue 19 a un titre proche. Ouvrez la fiche pour confirmer ou en choisir une autre.
 - `Nouveau` : pas encore sur GitHub.
 
-Une tâche liée affiche aussi son **sprint** et son **statut**, c'est-à-dire sa colonne sur le tableau de projet : `Ready`, `In progress`, `In review`, `Done`, avec les noms exacts de votre tableau. Une issue fermée est marquée **Fermée**.
+Une tâche affiche aussi sa release et, une fois liée, son **sprint**.
 
-Survoler une ligne sélectionne son post-it sur le tableau ; cliquer zoome dessus et ouvre sa fiche. Au-dessus de l'arbre : les totaux, la part de post-its liés, et des filtres par release, par sprint et par statut.
+Survoler une ligne sélectionne son post-it sur le tableau ; cliquer zoome dessus et ouvre sa fiche. Au-dessus de l'arbre : les totaux, la part de post-its liés, et des filtres par release et par sprint.
 
-**Étiquettes sur le tableau.** L'interrupteur **Étiquettes** pose une petite étiquette dans le coin de chaque post-it lié, par exemple `#19 · Sprint 1 · Ready`. Elle suit son post-it quand il bouge et change quand l'issue change.
+**Étiquettes sur le tableau.** L'interrupteur **Étiquettes** pose une petite étiquette dans le coin de chaque post-it lié, par exemple `#6 · Sprint 1 · In Progress` : l'issue, son sprint et son **statut**, c'est-à-dire sa colonne sur le tableau de projet (`Todo`, `In Progress`, `Done`, ou les noms de votre tableau). Une issue fermée est marquée **Fermée**. L'étiquette suit son post-it quand il bouge et change quand l'issue change.
+
+![Les étiquettes sur les post-its, à côté de l'arbre](../images/fr/board-labels.jpg)
 
 ## La fiche d'un post-it
 
 Cliquez sur un post-it du tableau, ou sur une ligne de l'arbre : sa fiche s'ouvre en haut de l'onglet Carte.
 
 **Déjà sur GitHub ? Choisissez son issue.** La fiche propose les trois issues les plus probables, avec les mots en commun, et une recherche. Cliquez sur l'une pour la lier. **Aucune de celles-ci** marque le post-it comme pas encore sur GitHub. Une fiche liée affiche le statut de l'issue, son sprint, sa taille et qui est dessus ; **Pas cette issue** retire le lien. Les liens sont gardés dans le fichier : toute l'équipe voit les mêmes.
+
+![La fiche d'une tâche liée : statut, sprint, taille](../images/fr/linked-card.jpg)
 
 **Pas encore ? Créez son issue.** La fiche montre l'issue avant que rien ne soit écrit :
 
@@ -89,6 +93,8 @@ L'onglet liste aussi les titres proches à confirmer, les post-its sans issue, e
 ## Ce qui a bougé cette semaine
 
 Au point de la semaine, cliquez sur **Démarrer la semaine** dans Écarts. Le plugin garde une photo des issues dans le fichier. Ensuite, la section liste les issues créées, fermées, rouvertes ou modifiées, champ par champ : titre, jalon, statut, sprint, taille, personnes assignées. **Nouvelle semaine** déplace le point de départ.
+
+![Ce qui a bougé depuis le début de la semaine, puis les écarts](../images/fr/differences.jpg)
 
 L'historique de GitHub n'enregistre pas les changements faits sur un tableau de projet, comme un statut ou un sprint : c'est pourquoi le plugin compare à sa propre photo.
 

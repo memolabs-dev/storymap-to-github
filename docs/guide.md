@@ -24,13 +24,13 @@ The plugin knows two ways teams lay out a story map, and picks one by itself:
 - **By rows**, as in Figma's story map template. Each labelled row gives the kind of the stickies in it: User Persona becomes notes, Activities epics, Tasks features, and each Release row a milestone holding its tasks.
 - **By colours**, as on many team boards. Each sticky colour gives one kind of item: by default yellow epics, blue features, green steps, violet tasks and pink notes.
 
-![The Reading tab, here reading Figma's template by rows](images/reading.jpg)
+![The Reading tab, here reading Figma's template by rows](images/en/reading.jpg)
 
 The Reading tab shows what was found and lets you change it: force rows or colours, change what a row or a colour means. A section named `Legend`, and stickies that explain the colours, are skipped. A feature belongs to the nearest epic at or left of it, a task to the column it overlaps most. An arrow between two stickies sets the parent, whatever the column.
 
 ## The map
 
-![The Map tab: the tree, the link progress and the filters](images/map-tree.jpg)
+![The Map tab: the tree, the link progress and the filters](images/en/map-tree.jpg)
 
 The tree shows epics, features with their steps, tasks and sub-tasks. Each line has a badge:
 
@@ -38,11 +38,13 @@ The tree shows epics, features with their steps, tasks and sub-tasks. Each line 
 - `#19?` in orange: issue 19 has a close title. Open the card to confirm or pick another.
 - `New`: not on GitHub yet.
 
-A linked task also shows its **sprint** and its **status**, that is its column on the project board: `Ready`, `In progress`, `In review`, `Done`, with the names your board uses. A closed issue is marked **Closed**.
+A task also shows its release and, once linked, its **sprint**.
 
-Hovering a line selects its sticky on the board; clicking it zooms there and opens its card. Above the tree: the counts, how many stickies are linked, and filters by release, by sprint and by status.
+Hovering a line selects its sticky on the board; clicking it zooms there and opens its card. Above the tree: the counts, how many stickies are linked, and filters by release and by sprint.
 
-**Labels on the board.** The Labels switch puts a small label in the corner of each linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves and change when the issue changes.
+**Labels on the board.** The Labels switch puts a small label in the corner of each linked sticky, such as `#6 · Sprint 1 · In Progress`: the issue, its sprint and its **status**, that is its column on the project board (`Todo`, `In Progress`, `Done`, or whatever names your board uses). A closed issue is marked **Closed**. Labels follow their sticky when it moves and change when the issue changes.
+
+![Labels on the stickies, next to the tree](images/en/board-labels.jpg)
 
 ## A sticky's card
 
@@ -50,9 +52,11 @@ Click a sticky on the board, or a line in the tree, and its card opens at the to
 
 **Already on GitHub?** The card shows the three issues it most likely is, with the words they share, and a search box. Click one to link it. **None of these** marks the sticky as not on GitHub yet. A linked card shows the issue's status, sprint, size and who is on it, and **Not this issue** removes the link. Links are kept in the file, so the whole team sees the same ones.
 
+![The card of a linked task: status, sprint, size](images/en/linked-card.jpg)
+
 **Not yet? Create its issue.** The card previews the issue before anything is written:
 
-![Creating an issue from a sticky's card](images/publish-preview.jpg)
+![Creating an issue from a sticky's card](images/en/publish-preview.jpg)
 
 - **Title**, from the sticky, which you can change.
 - **Story and acceptance criteria**: the issue text, prefilled from the repository's template (as a, I want, so that, acceptance criteria, then where the sticky sits on the map). Write the story here.
@@ -89,6 +93,8 @@ The tab also lists close titles to confirm, the stickies with no issue, and the 
 ## What moved this week
 
 At the weekly, press **Start the week now** in Differences. The plugin keeps a snapshot of the issues in the file. From then on, the section lists the issues created, closed, reopened or changed, field by field: title, milestone, status, sprint, size, assignees. **Start a new week** moves the starting point.
+
+![What moved since the start of the week, then the differences](images/en/differences.jpg)
 
 GitHub's issue history does not record changes made on a project board, such as a status or a sprint, which is why the plugin compares against its own snapshot.
 
