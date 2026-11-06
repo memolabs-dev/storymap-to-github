@@ -91,6 +91,7 @@
   .steps { color: var(--text-2); padding: 0 6px 4px 66px; }
   .pill { border-radius: 4px; padding: 0 5px; font-size: 11px; line-height: 18px; white-space: nowrap; flex: none; }
   .pill.milestone { background: var(--bg-2); color: var(--text-2); }
+  .pill.sprint { background: var(--bg); color: var(--text-2); border: 1px solid var(--border); line-height: 16px; }
   .pill.new { background: var(--bg-selected); color: var(--brand-text); }
   .pill.exists { background: var(--success-bg); color: var(--success); }
   .pill.maybe { background: var(--warning-bg); color: var(--warning); }
@@ -149,8 +150,9 @@
   <section id="tab-github" role="tabpanel" hidden>
     <div id="gh-status"></div>
     <label class="field"><span>Repository</span><input type="text" id="repo" placeholder="owner/name" autocomplete="off" spellcheck="false"></label>
-    <label class="field"><span>Token (optional)</span><input type="password" id="token" placeholder="Only needed for a private repository" autocomplete="off"></label>
-    <p class="help" id="token-help">Read-only use: a fine-grained token with Issues: read is enough. It stays on this computer.</p>
+    <label class="field"><span>Project board, for sprints (optional)</span><input type="text" id="project" placeholder="https://github.com/orgs/owner/projects/12" autocomplete="off" spellcheck="false"></label>
+    <label class="field"><span>Token (optional)</span><input type="password" id="token" placeholder="Needed for sprints or a private repository" autocomplete="off"></label>
+    <p class="help" id="token-help">Read-only use. Sprints are read through GitHub's GraphQL API, which always needs a token: a classic token with read:project (and repo for a private repository). It stays on this computer.</p>
     <p style="margin-top:12px"><button class="btn primary" id="compare">Compare with issues</button> <button class="btn ghost" id="forget" hidden>Forget token</button></p>
     <p class="help">The plugin only reads issues to mark each item as new, existing or possibly existing. It creates nothing.</p>
   </section>
@@ -199,15 +201,35 @@
     </select>`;
   };
 
-  const row = (item, kind) => `
+  // The GitHub issue an item is (linked by hand or same title), with its
+  // sprint, status and size when a project board was read.
+  const issueOf = (id) => {
+    const m = data.matches[id];
+    if (!m || (m.status !== 'linked' && m.status !== 'exists')) return null;
+    return data.issues.find((i) => i.number === m.number) || null;
+  };
+
+  const row = (item, kind) => {
+    const issue = kind === 'task' ? issueOf(item.id) : null;
+    const tip = issue ? [issue.status, issue.size && `size ${issue.size}`].filter(Boolean).join(', ') : '';
+    return `
     <div class="row ${kind}" tabindex="0" data-id="${esc(item.id)}">
       <span class="dot ${kind}"></span><span class="kind">${TYPE_LABEL[kind]}</span>
       <span class="label" title="${esc(item.title)}">${esc(item.title)}</span>
       ${item.release ? `<span class="pill milestone">${esc(item.release)}</span>` : ''}
+      ${issue && issue.sprint ? `<span class="pill sprint" title="${esc(tip)}">${esc(issue.sprint)}</span>` : ''}
       ${kind !== 'step' && kind !== 'note' ? badge(item.id) : ''}
     </div>`;
+  };
 
-  const matchesFilter = (t) => filter === 'all' || (filter === 'none' ? !t.release : t.release === filter);
+  let sprintFilter = 'all';
+  const filtering = () => filter !== 'all' || sprintFilter !== 'all';
+  const sprintOk = (t) => {
+    if (sprintFilter === 'all') return true;
+    const issue = issueOf(t.id);
+    return sprintFilter === 'none' ? !(issue && issue.sprint) : Boolean(issue && issue.sprint === sprintFilter);
+  };
+  const matchesFilter = (t) => sprintOk(t) && (filter === 'all' || (filter === 'none' ? !t.release : t.release === filter));
   // A task stays visible when it or one of its sub-tasks is in the filter.
   const keep = (t) => matchesFilter(t) || (t.subtasks || []).some(keep);
 
@@ -218,7 +240,7 @@
 
   const featureHtml = (f) => {
     const tasks = f.tasks.filter(keep);
-    if (filter !== 'all' && !tasks.length) return '';
+    if (filtering() && !tasks.length) return '';
     return `<li>${row(f, 'feature')}
       ${f.steps.length ? `<div class="steps">Steps: ${f.steps.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
       ${tasks.length ? `<ul>${tasks.map(taskHtml).join('')}</ul>` : ''}</li>`;
@@ -241,10 +263,18 @@
     const chips = b.milestones.length ? `<div class="chips" role="group" aria-label="Filter by milestone">
       ${['all', ...b.milestones, ...(b.stats.withoutMilestone ? ['none'] : [])].map((m) => `<button class="chip" aria-pressed="${filter === m}" data-filter="${esc(m)}">${m === 'all' ? 'All' : m === 'none' ? 'No milestone' : esc(m)}</button>`).join('')}
     </div>` : '';
+    // Sprints come from the project board: only shown once it was read.
+    const sprintChips = data.sprints && data.sprints.length ? `<div class="chips" role="group" aria-label="Filter by sprint">
+      ${['all', ...data.sprints.map((s) => s.title), 'none'].map((s) => {
+        const sprint = data.sprints.find((x) => x.title === s);
+        const label = s === 'all' ? 'All sprints' : s === 'none' ? 'Not in a sprint' : s;
+        return `<button class="chip" aria-pressed="${sprintFilter === s}" data-sprint="${esc(s)}" ${sprint ? `title="${esc(`${sprint.start} to ${sprint.end}`)}"` : ''}>${esc(label)}</button>`;
+      }).join('')}
+    </div>` : '';
 
     const epics = b.epics.map((e) => {
       const inner = [...e.features.map(featureHtml), ...e.tasks.filter(keep).map(taskHtml)].join('');
-      if (filter !== 'all' && !inner) return '';
+      if (filtering() && !inner) return '';
       return `<li>${row(e, 'epic')}${inner ? `<ul>${inner}</ul>` : ''}</li>`;
     }).join('');
     const loose = b.looseFeatures.map(featureHtml).join('');
@@ -256,7 +286,7 @@
         <div class="stat"><b>${b.stats.tasks}</b><span>tasks</span></div>
         <div class="stat"><b>${b.milestones.length}</b><span>milestones</span></div>
       </div>
-      ${notices.join('')}${chips}
+      ${notices.join('')}${chips}${sprintChips}
       <ul class="tree">${epics}${loose}</ul>
       ${b.notes.length ? `<p class="section-title">PO notes, not issues</p><ul class="tree">${b.notes.map((x) => `<li>${row(x, 'note')}</li>`).join('')}</ul>` : ''}
       ${b.orphans.length ? `<p class="section-title">Without a parent</p><ul class="tree">${b.orphans.map((x) => `<li>${row(x, x.kind)}</li>`).join('')}</ul>` : ''}`;
@@ -280,7 +310,7 @@
   }
 
   // Drift: where the map and GitHub disagree, and, on demand, why.
-  const DRIFT_LABEL = { dropped: 'Dropped on GitHub', milestone: 'Milestone', parent: 'Parent', title: 'Title' };
+  const DRIFT_LABEL = { dropped: 'Dropped on GitHub', schedule: 'Planned too late', milestone: 'Milestone', parent: 'Parent', title: 'Title' };
   const whyCache = {};
 
   function renderDrift() {
@@ -319,6 +349,7 @@
   function renderGithub() {
     const s = data.settings;
     if (document.activeElement !== $('repo')) $('repo').value = s.repo || '';
+    if (document.activeElement !== $('project')) $('project').value = s.project || '';
     $('token').placeholder = s.hasToken ? 'Saved on this computer' : 'Only needed for a private repository';
     $('forget').hidden = !s.hasToken;
   }
@@ -358,6 +389,8 @@
     if (goto) document.querySelector(`.tab[data-tab="${goto.dataset.goto}"]`).click();
     const chip = e.target.closest('[data-filter]');
     if (chip) { filter = chip.dataset.filter; renderPreview(); }
+    const sprintChip = e.target.closest('[data-sprint]');
+    if (sprintChip) { sprintFilter = sprintChip.dataset.sprint; renderPreview(); }
     const r = e.target.closest('.row[data-id]');
     if (r) send({ type: 'focus', id: r.dataset.id });
   });
@@ -373,7 +406,7 @@
     }
   });
   $('refresh').addEventListener('click', () => { $('scope').textContent = 'Reading the board…'; send({ type: 'refresh' }); });
-  $('compare').addEventListener('click', () => { send({ type: 'compare', repo: $('repo').value, token: $('token').value }); $('token').value = ''; });
+  $('compare').addEventListener('click', () => { send({ type: 'compare', repo: $('repo').value, project: $('project').value, token: $('token').value }); $('token').value = ''; });
   $('forget').addEventListener('click', () => send({ type: 'forget-token' }));
   $('copy').addEventListener('click', () => {
     if (!data) return;
@@ -393,7 +426,7 @@
     if (msg.type === 'board') { data = msg; render(); }
     else if (msg.type === 'why-result') { whyCache[msg.key] = msg.error ? { error: msg.error } : { lines: msg.lines }; renderDrift(); }
     else if (msg.type === 'status') {
-      $('gh-status').innerHTML = `<div class="notice ${msg.state === 'error' ? 'error' : msg.state === 'ok' ? 'ok' : 'info'}" role="status">${esc(msg.text)}</div>`;
+      $('gh-status').innerHTML = `<div class="notice ${msg.state === 'error' ? 'error' : msg.state === 'ok' ? 'ok' : msg.state === 'warn' ? 'warn' : 'info'}" role="status">${esc(msg.text)}</div>`;
     } else if (msg.type === 'selection-changed' && data && !$('reread')) {
       $('scope').insertAdjacentHTML('beforeend', ' · <button class="linkish" id="reread">selection changed, read again</button>');
       $('reread').onclick = () => $('refresh').click();

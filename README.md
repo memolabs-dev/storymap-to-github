@@ -22,6 +22,8 @@ Comparing with GitHub, in the GitHub tab, reads the issues of a repository and m
 
 Once stickies are linked to issues, the Drift tab lists where the plan and the work no longer say the same thing: a task in another release row than its milestone, an issue under another parent than on the map, a renamed issue, an issue closed as not planned while the map still has it. It also lists the stickies with no issue and the open issues that are not on the map.
 
+**Sprints.** Name the GitHub Projects board in the GitHub tab to read each issue's sprint, status and size. Tasks then carry their sprint, the preview filters by sprint, and Drift flags a task whose sprint ends after the due date of its release on the map. GitHub only serves projects through GraphQL, which needs a token that can read projects (classic token: `read:project`).
+
 **Why?** reads the issue's history on GitHub and says who changed what, and when ("2026-11-05, @someone set the milestone to P0"). Nothing is changed on either side: the team decides which one is right.
 
 ## Try it

@@ -414,6 +414,13 @@ function findDrift(backlog, issues, matches) {
     const m = matches[item.id];
     return m && (m.status === 'linked' || m.status === 'exists') ? byNumber.get(m.number) : null;
   };
+  // Release due dates come from the repository milestones of the same name.
+  const milestones = new Map();
+  for (const i of issues) if (i.milestone && i.milestoneDue) milestones.set(i.milestone, i.milestoneDue);
+  const dueOf = (release) => {
+    for (const [title, date] of milestones) if (sameRelease(release, title)) return { title, date };
+    return null;
+  };
   const drifts = [];
   const onlyOnBoard = [];
   const toConfirm = [];
@@ -433,6 +440,12 @@ function findDrift(backlog, issues, matches) {
       drifts.push({ ...base, kind: 'dropped', board: 'Still on the map', github: issue.state_reason === 'duplicate' ? 'Closed as duplicate' : 'Closed as not planned' });
     }
     if (normalize(item.title) !== normalize(issue.title)) drifts.push({ ...base, kind: 'title', board: item.title, github: issue.title });
+    // Planned too late: the sprint ends after the due date of the release
+    // the map puts the task in.
+    const due = kind === 'task' && item.release ? dueOf(item.release) : null;
+    if (due && issue.sprint && issue.sprint.end > due.date) {
+      drifts.push({ ...base, kind: 'schedule', board: `${item.release}, due ${due.date}`, github: `${issue.sprint.title}, ends ${issue.sprint.end}` });
+    }
     if (kind === 'task' && !sameRelease(item.release, issue.milestone)) {
       drifts.push({ ...base, kind: 'milestone', board: item.release || 'No release row', github: issue.milestone || 'No milestone' });
     }
@@ -467,7 +480,7 @@ function findDrift(backlog, issues, matches) {
     walkTasks(f.tasks, [f]);
   }
 
-  const order = { dropped: 0, milestone: 1, parent: 2, title: 3 };
+  const order = { dropped: 0, schedule: 1, milestone: 2, parent: 3, title: 4 };
   drifts.sort((a, b) => order[a.kind] - order[b.kind]);
   const onlyOnGitHub = issues
     .filter((i) => i.state === 'open' && !used.has(i.number))
@@ -481,6 +494,7 @@ function explainEvents(events, kind) {
   const wanted = {
     title: ['renamed'],
     milestone: ['milestoned', 'demilestoned'],
+    schedule: ['milestoned', 'demilestoned'],
     parent: ['parent_issue_added', 'parent_issue_removed'],
     dropped: ['closed', 'reopened'],
   }[kind] || [];
@@ -498,6 +512,70 @@ function explainEvents(events, kind) {
       if (e.event === 'closed') return `${when}, ${who} closed it${e.commit_id ? ` with commit ${e.commit_id.slice(0, 7)}` : ''}`;
       return `${when}, ${who} reopened it`;
     });
+}
+
+// GitHub Projects: the sprint, status and size of each issue. Sprints are
+// iteration fields; any iteration field counts, whatever its name.
+function parseProjectUrl(url) {
+  const m = (url || '').trim().match(/github\.com\/(orgs|users)\/([\w.-]+)\/projects\/(\d+)/);
+  return m ? { kind: m[1] === 'orgs' ? 'organization' : 'user', owner: m[2], number: Number(m[3]) } : null;
+}
+
+function projectQuery(kind) {
+  return `query($owner: String!, $number: Int!, $cursor: String) {
+  owner: ${kind === 'user' ? 'user' : 'organization'}(login: $owner) {
+    projectV2(number: $number) {
+      title
+      fields(first: 50) { nodes { ... on ProjectV2IterationField { name configuration {
+        iterations { title startDate duration } completedIterations { title startDate duration } } } } }
+      items(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          content { ... on Issue { number repository { nameWithOwner } } }
+          fieldValues(first: 30) { nodes {
+            ... on ProjectV2ItemFieldIterationValue { title startDate duration }
+            ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+          } }
+        }
+      }
+    }
+  }
+}`;
+}
+
+function addDays(iso, days) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+const sprintOf = (v) => ({ title: v.title, start: v.startDate, end: addDays(v.startDate, v.duration - 1) });
+
+// pages: the `projectV2` object of each page returned by projectQuery.
+// Returns { title, sprints: [{ title, start, end }], items: { 'owner/repo#12': { sprint, status, size } } }
+function readProject(pages) {
+  const sprints = [];
+  for (const field of pages[0].fields.nodes) {
+    if (!field || !field.configuration) continue;
+    for (const it of [...field.configuration.completedIterations, ...field.configuration.iterations]) sprints.push(sprintOf(it));
+  }
+  sprints.sort((a, b) => (a.start < b.start ? -1 : 1));
+  const items = {};
+  for (const page of pages) {
+    for (const node of page.items.nodes) {
+      const issue = node.content;
+      if (!issue || !issue.number) continue;
+      const entry = {};
+      for (const v of node.fieldValues.nodes) {
+        if (!v) continue;
+        if (v.startDate) entry.sprint = sprintOf(v);
+        else if (v.name && v.field && /status|statut/i.test(v.field.name)) entry.status = v.name;
+        else if (v.name && v.field && /size|taille/i.test(v.field.name)) entry.size = v.name;
+      }
+      items[`${issue.repository.nameWithOwner}#${issue.number}`.toLowerCase()] = entry;
+    }
+  }
+  return { title: pages[0].title, sprints, items };
 }
 
 // A Markdown draft of the backlog, to paste into an issue or a note.
@@ -528,7 +606,7 @@ function toMarkdown(backlog, matches = {}) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, toMarkdown };
+  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl, projectQuery, readProject, toMarkdown };
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +675,7 @@ if (typeof figma !== 'undefined') {
     const saved = (await figma.clientStorage.getAsync('legend')) || {};
     state.legend = { ...defaultLegend(state.palette), ...saved };
     state.repo = (await figma.clientStorage.getAsync('repo')) || '';
+    state.project = (await figma.clientStorage.getAsync('project')) || '';
     state.token = (await figma.clientStorage.getAsync('token')) || '';
     state.links = (await figma.clientStorage.getAsync(linksKey())) || {};
   };
@@ -612,11 +691,12 @@ if (typeof figma !== 'undefined') {
       legend: state.legend,
       backlog: state.backlog,
       matches: state.matches,
-      issues: state.issues ? state.issues.map((i) => ({ number: i.number, title: i.title })) : [],
+      issues: state.issues ? state.issues.map((i) => ({ number: i.number, title: i.title, sprint: i.sprint ? i.sprint.title : null, status: i.status || null, size: i.size || null })) : [],
       nodeTypes: state.nodeTypes,
       drift: state.issues ? findDrift(state.backlog, state.issues, state.matches) : null,
       markdown: toMarkdown(state.backlog, state.matches),
-      settings: { repo: state.repo, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
+      settings: { repo: state.repo, project: state.project, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
+      sprints: state.sprints || [],
     });
   };
 
@@ -642,12 +722,38 @@ if (typeof figma !== 'undefined') {
         state_reason: i.state_reason || null,
         type: i.type ? i.type.name : null,
         milestone: i.milestone ? i.milestone.title : null,
+        milestoneDue: i.milestone && i.milestone.due_on ? i.milestone.due_on.slice(0, 10) : null,
         parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
       })));
       if (batch.length < 100) break;
     }
     return all;
   };
+
+  // Sprints live in a GitHub Projects board, read through GraphQL, which
+  // always needs a token (read access to projects).
+  const fetchProject = async () => {
+    const target = parseProjectUrl(state.project);
+    if (!target) throw new Error('Paste the project board address, like https://github.com/orgs/acme/projects/12.');
+    if (!state.token) throw new Error('Reading sprints needs a token that can read projects (classic token: read:project).');
+    const pages = [];
+    let cursor = null;
+    do {
+      const res = await fetch('https://api.github.com/graphql', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: projectQuery(target.kind), variables: { owner: target.owner, number: target.number, cursor } }),
+      });
+      const body = await res.json();
+      const project = body.data && body.data.owner && body.data.owner.projectV2;
+      if (!res.ok || !project) throw new Error(`Could not read the project board${body.errors ? `: ${body.errors[0].message}` : '.'}`);
+      pages.push(project);
+      cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;
+    } while (cursor && pages.length < 20);
+    return readProject(pages);
+  };
+
+  const withProject = (issues, project) => issues.map((i) => ({ ...i, ...(project.items[`${state.repo}#${i.number}`.toLowerCase()] || {}) }));
 
   figma.showUI(__html__, { width: 420, height: 680, themeColors: true, title: 'Storymap to GitHub' });
 
@@ -671,10 +777,24 @@ if (typeof figma !== 'undefined') {
         if (typeof msg.token === 'string' && msg.token) state.token = msg.token.trim();
         await figma.clientStorage.setAsync('repo', state.repo);
         if (msg.token) await figma.clientStorage.setAsync('token', state.token);
+        state.project = (msg.project || '').trim();
+        await figma.clientStorage.setAsync('project', state.project);
         figma.ui.postMessage({ type: 'status', state: 'loading', text: `Reading issues of ${state.repo}…` });
         state.issues = await fetchIssues();
+        let note = `${state.issues.length} issues read from ${state.repo}.`;
+        state.sprints = [];
+        if (state.project) {
+          try {
+            const project = await fetchProject();
+            state.issues = withProject(state.issues, project);
+            state.sprints = project.sprints;
+            note += ` Sprints read from "${project.title}" (${project.sprints.length}).`;
+          } catch (err) {
+            note += ` Sprints not read: ${err.message}`;
+          }
+        }
         publish();
-        figma.ui.postMessage({ type: 'status', state: 'ok', text: `${state.issues.length} issues read from ${state.repo}.` });
+        figma.ui.postMessage({ type: 'status', state: note.includes('not read') ? 'warn' : 'ok', text: note });
       } else if (msg.type === 'why') {
         const headers = { Accept: 'application/vnd.github+json' };
         if (state.token) headers.Authorization = `Bearer ${state.token}`;

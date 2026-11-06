@@ -232,6 +232,46 @@ test('the why comes from the issue history', () => {
   assert.deepEqual(core.explainEvents(events, 'parent'), []);
 });
 
+test('project board URLs give the owner and the number', () => {
+  assert.deepEqual(core.parseProjectUrl('https://github.com/orgs/acme/projects/44/views/1'), { kind: 'organization', owner: 'acme', number: 44 });
+  assert.deepEqual(core.parseProjectUrl('https://github.com/users/jane/projects/5'), { kind: 'user', owner: 'jane', number: 5 });
+  assert.equal(core.parseProjectUrl('https://github.com/acme/repo'), null);
+  assert.match(core.projectQuery('user'), /owner: user\(login/);
+});
+
+// One page of the projectV2 query, shaped like GitHub's answer.
+const projectPage = {
+  title: 'Library',
+  fields: { nodes: [{}, { name: 'Sprint', configuration: {
+    iterations: [{ title: 'Sprint 2', startDate: '2026-11-16', duration: 7 }, { title: 'Sprint 4', startDate: '2026-11-30', duration: 7 }],
+    completedIterations: [{ title: 'Sprint 1', startDate: '2026-11-09', duration: 7 }],
+  } }] },
+  items: { pageInfo: { hasNextPage: false }, nodes: [
+    { content: { number: 19, repository: { nameWithOwner: 'acme/library' } }, fieldValues: { nodes: [
+      {}, { title: 'Sprint 4', startDate: '2026-11-30', duration: 7 }, { name: 'Ready', field: { name: 'Status' } }, { name: 'M', field: { name: 'Size' } },
+    ] } },
+    { content: {}, fieldValues: { nodes: [] } },
+  ] },
+};
+
+test('a project page gives sprints with their end date, and each issue its sprint, status and size', () => {
+  const p = core.readProject([projectPage]);
+  assert.deepEqual(p.sprints.map((s) => [s.title, s.end]), [['Sprint 1', '2026-11-15'], ['Sprint 2', '2026-11-22'], ['Sprint 4', '2026-12-06']]);
+  assert.deepEqual(p.items['acme/library#19'], { sprint: { title: 'Sprint 4', start: '2026-11-30', end: '2026-12-06' }, status: 'Ready', size: 'M' });
+});
+
+test('a task planned in a sprint ending after its release is due drifts', () => {
+  const b = core.buildBacklog(board(), legend);
+  const issues = [
+    { number: 19, title: 'Back-office', html_url: 'u', state: 'open', milestone: 'P0 · MVP', milestoneDue: '2026-11-30', parent: null, ...core.readProject([projectPage]).items['acme/library#19'] },
+    { number: 3, title: 'Import books from a spreadsheet', html_url: 'u3', state: 'open', milestone: 'P1', milestoneDue: '2026-12-31', parent: null, sprint: { title: 'Sprint 4', start: '2026-11-30', end: '2026-12-06' } },
+  ];
+  const d = core.findDrift(b, issues, core.matchIssues(b, issues));
+  const schedule = d.drifts.filter((x) => x.kind === 'schedule');
+  assert.deepEqual(schedule.map((x) => [x.title, x.board, x.github]), [['Back-office', 'P0 · MVP, due 2026-11-30', 'Sprint 4, ends 2026-12-06']]);
+  assert.equal(d.drifts[0].kind, 'schedule');
+});
+
 test('the Markdown draft lists the tree', () => {
   const md = core.toMarkdown(core.buildBacklog(board(), legend));
   assert.match(md, /## Epic: Catalogue/);

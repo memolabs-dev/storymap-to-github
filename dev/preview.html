@@ -27,6 +27,7 @@
   const palette = buildPalette(items);
   const legend = defaultLegend(palette);
   let issues = null;
+  let sprints = [];
   const links = {};
 
   const post = () => {
@@ -34,7 +35,8 @@
     const matches = issues ? matchIssues(backlog, issues, links) : {};
     frame.contentWindow.postMessage({ pluginMessage: {
       type: 'board', scope: 'page', page: 'Story map', palette, legend, backlog, matches,
-      issues: issues ? issues.map((i) => ({ number: i.number, title: i.title })) : [],
+      issues: issues ? issues.map((i) => ({ number: i.number, title: i.title, sprint: i.sprint ? i.sprint.title : null, status: i.status || null, size: i.size || null })) : [],
+      sprints,
       drift: issues ? findDrift(backlog, issues, matches) : null,
       nodeTypes: { STICKY: items.length },
       markdown: toMarkdown(backlog, matches),
@@ -61,9 +63,19 @@
         if (!res.ok) throw new Error(`GitHub answered ${res.status}.`);
         issues = (await res.json()).filter((i) => !i.pull_request).map((i) => ({
           number: i.number, title: i.title, html_url: i.html_url, state: i.state, state_reason: i.state_reason || null,
-          type: i.type ? i.type.name : null, milestone: i.milestone ? i.milestone.title : null,
+          type: i.type ? i.type.name : null, milestone: i.milestone ? i.milestone.title : null, milestoneDue: i.milestone && i.milestone.due_on ? i.milestone.due_on.slice(0, 10) : null,
           parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
         }));
+        // Sprints: the browser has no token, so the preview reads a project
+        // saved by hand in dev/local/project.json (git-ignored), if any.
+        try {
+          const saved = await fetch('local/project.json');
+          if (saved.ok) {
+            const project = await saved.json();
+            sprints = project.sprints;
+            issues = issues.map((i) => ({ ...i, ...(project.items[`${repo}#${i.number}`.toLowerCase()] || {}) }));
+          }
+        } catch (err) { /* no saved project: no sprints */ }
         post();
         frame.contentWindow.postMessage({ pluginMessage: { type: 'status', state: 'ok', text: `${issues.length} issues read from ${repo}.` } }, '*');
       } catch (err) {
