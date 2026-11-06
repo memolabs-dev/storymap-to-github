@@ -26,6 +26,8 @@ import {
   readProject,
   toMarkdown,
 } from './core'
+import { getLang, plural, resolveLang, setLang, t } from './i18n'
+import type { LangSetting } from './i18n'
 import type { Action, Backlog, BoardItem, Role, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
 import type {
   AddTemplateHandler,
@@ -57,6 +59,7 @@ import type {
   SelectedHandler,
   SetGuideHandler,
   SetLabelsHandler,
+  SetLangHandler,
   SetLegendHandler,
   SetModeHandler,
   SetPublishingHandler,
@@ -96,11 +99,16 @@ interface State {
   meta: (RepoMeta & { canPush: boolean }) | null
   writeAllowed: boolean
   publishing: Publishing
+  // The language picked by this person ('auto' follows the system), and the
+  // system's language, sent by the window.
+  langSetting: LangSetting
+  navigatorLanguage: string
 }
 
 // Generic starting values for a new issue; each team changes them in the
 // GitHub tab, per repository.
-const DEFAULT_PUBLISHING: Publishing = { startLabel: 'needs-refinement', startStatus: 'Backlog', bodyTemplate: '' }
+// An empty starting status means the first status of the project board.
+const DEFAULT_PUBLISHING: Publishing = { startLabel: 'needs-refinement', startStatus: '', bodyTemplate: '' }
 
 const state: State = {
   items: [],
@@ -126,6 +134,15 @@ const state: State = {
   meta: null,
   writeAllowed: false,
   publishing: { ...DEFAULT_PUBLISHING },
+  langSetting: 'auto',
+  navigatorLanguage: '',
+}
+
+// The language follows the person's setting, or the system when automatic.
+async function loadLang() {
+  const saved = (await figma.clientStorage.getAsync('lang')) as LangSetting | undefined
+  state.langSetting = saved === 'en' || saved === 'fr' ? saved : 'auto'
+  setLang(resolveLang(state.langSetting, state.navigatorLanguage))
 }
 
 // Settings that belong to one board are stored under the file's name and
@@ -236,8 +253,11 @@ function owners(): Record<Action, Role> {
 
 function mustBeAllowed(action: Action) {
   if (canDo(state.role, action, owners())) return
-  const who = owners()[action] === 'pm' ? 'the product manager' : 'the tech lead'
-  throw new Error(`On this board, that change is for ${who}. Change your role or the split in the GitHub tab.`)
+  throw new Error(
+    owners()[action] === 'pm'
+      ? t('On this board, that change is for the product manager. Change your role or the split in the GitHub tab.')
+      : t('On this board, that change is for the tech lead. Change your role or the split in the GitHub tab.'),
+  )
 }
 
 // A starting story map on an empty page, laid out like Figma's template.
@@ -289,10 +309,10 @@ function readWeek() {
 }
 
 function startWeek() {
-  if (!state.repo || !state.issues) throw new Error('Connect a repository first.')
+  if (!state.repo || !state.issues) throw new Error(t('Connect a repository first.'))
   figma.root.setPluginData(weekKey(), JSON.stringify({ at: new Date().toISOString(), snapshot: snapshotOf(state.issues) }))
   publish()
-  emit<StatusHandler>('STATUS', { state: 'ok', text: 'A new week starts now: changes from here on show in Differences.' })
+  emit<StatusHandler>('STATUS', { state: 'ok', text: t('A new week starts now: changes from here on show in Differences.') })
 }
 
 // Differences the team keeps on purpose, on each sticky and per repository,
@@ -314,30 +334,33 @@ function readKept(): Record<string, Array<string>> {
 async function resolve(id: string, key: string, side: 'map' | 'github' | 'keep') {
   if (!state.backlog || !state.issues) return
   const drift = findDrift(state.backlog, state.issues, state.matches).drifts.find((d) => d.id === id && driftKey(d) === key)
-  if (!drift) throw new Error('This difference is already settled.')
-  emit<StatusHandler>('STATUS', { state: 'loading', text: side === 'keep' ? 'Keeping both…' : side === 'github' ? 'Changing the sticky…' : `Changing #${drift.number} on GitHub…` })
+  if (!drift) throw new Error(t('This difference is already settled.'))
+  emit<StatusHandler>('STATUS', {
+    state: 'loading',
+    text: side === 'keep' ? t('Keeping both…') : side === 'github' ? t('Changing the sticky…') : t('Changing #{n} on GitHub…', { n: drift.number }),
+  })
   const node = stickies.get(id)
   if (side === 'keep') {
-    if (!node) throw new Error('The sticky is not on this page.')
+    if (!node) throw new Error(t('The sticky is not on this page.'))
     const list = node.getPluginData(keptKey()) ? (JSON.parse(node.getPluginData(keptKey())) as Array<string>) : []
     node.setPluginData(keptKey(), JSON.stringify([...list, key]))
     publish()
-    emit<StatusHandler>('STATUS', { state: 'ok', text: `Kept as it is: #${drift.number} will not show here again unless it changes.` })
+    emit<StatusHandler>('STATUS', { state: 'ok', text: t('Kept as it is: #{n} will not show here again unless it changes.', { n: drift.number }) })
     return
   }
   mustBeAllowed(drift.kind === 'parent' ? 'parent' : drift.kind === 'milestone' ? 'milestone' : 'title')
   if (side === 'github') {
-    if (drift.kind !== 'title' || !node) throw new Error('Only a title can be taken from GitHub onto the map.')
+    if (drift.kind !== 'title' || !node) throw new Error(t('Only a title can be taken from GitHub onto the map.'))
     const issue = state.issues.find((i) => i.number === drift.number)
     if (!issue) return
     await figma.loadFontAsync(node.text.fontName as FontName)
     node.text.characters = issue.title
     readBoard()
     publish()
-    emit<StatusHandler>('STATUS', { state: 'ok', text: `The sticky now reads "${issue.title}".` })
+    emit<StatusHandler>('STATUS', { state: 'ok', text: t('The sticky now reads "{title}".', { title: issue.title }) })
     return
   }
-  if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
+  if (!state.writeAllowed) throw new Error(t('Changes to {repo} are not allowed. Turn them on in the GitHub tab.', { repo: state.repo }))
   const issue = state.issues.find((i) => i.number === drift.number)
   if (!issue) return
   const patch = async (body: Record<string, unknown>) => {
@@ -346,35 +369,35 @@ async function resolve(id: string, key: string, side: 'map' | 'github' | 'keep')
       headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(`GitHub refused the change (${res.status}).`)
+    if (!res.ok) throw new Error(t('GitHub refused the change ({status}).', { status: res.status }))
     return (await res.json()) as RawIssue & { id: number }
   }
   let text = ''
   if (drift.kind === 'title') {
     await patch({ title: drift.target })
     issue.title = String(drift.target)
-    text = `#${drift.number} is now "${issue.title}".`
+    text = t('#{n} is now "{title}".', { n: drift.number, title: issue.title })
   } else if (drift.kind === 'milestone') {
     const release = drift.target ? String(drift.target) : null
     const milestone = release ? (state.meta ? state.meta.milestones.find((m) => sameRelease(release, m.title)) : null) : null
-    if (release && !milestone) throw new Error(`No milestone on GitHub matches "${release}". Create it on GitHub first.`)
+    if (release && !milestone) throw new Error(t('No milestone on GitHub matches "{release}". Create it on GitHub first.', { release }))
     await patch({ milestone: milestone ? milestone.number : null })
     issue.milestone = milestone ? milestone.title : null
-    text = milestone ? `#${drift.number} is now in ${milestone.title}.` : `#${drift.number} has no milestone now.`
+    text = milestone ? t('#{n} is now in {milestone}.', { n: drift.number, milestone: milestone.title }) : t('#{n} has no milestone now.', { n: drift.number })
   } else if (drift.kind === 'parent') {
     const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${drift.number}`, { headers: githubHeaders() })
-    if (!res.ok) throw new Error(`GitHub answered ${res.status} for #${drift.number}.`)
+    if (!res.ok) throw new Error(t('GitHub answered {status} for #{n}.', { status: res.status, n: drift.number }))
     const raw = (await res.json()) as { id: number }
     const moved = await fetch(`https://api.github.com/repos/${state.repo}/issues/${drift.target}/sub_issues`, {
       method: 'POST',
       headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ sub_issue_id: raw.id, replace_parent: true }),
     })
-    if (!moved.ok) throw new Error(`GitHub refused to move #${drift.number} under #${drift.target} (${moved.status}).`)
+    if (!moved.ok) throw new Error(t('GitHub refused to move #{n} under #{parent} ({status}).', { n: drift.number, parent: String(drift.target), status: moved.status }))
     issue.parent = Number(drift.target)
-    text = `#${drift.number} is now under #${drift.target}.`
+    text = t('#{n} is now under #{parent}.', { n: drift.number, parent: String(drift.target) })
   } else {
-    throw new Error('This difference is settled on GitHub by hand: open the issue.')
+    throw new Error(t('This difference is settled on GitHub by hand: open the issue.'))
   }
   publish()
   emit<StatusHandler>('STATUS', { state: 'ok', text })
@@ -476,7 +499,10 @@ function publish() {
       role: state.role,
       owners: owners(),
       sizeOptions: state.board && state.board.sizeField ? state.board.sizeField.options.map((o) => o.name) : null,
+      statusOptions: state.board ? state.board.statusOptions : null,
       publishing: state.publishing,
+      lang: getLang(),
+      langSetting: state.langSetting,
     },
   })
   void syncLabels()
@@ -519,15 +545,15 @@ const toIssue = (i: RawIssue): Issue => ({
 })
 
 async function fetchIssues(): Promise<Array<Issue>> {
-  if (!/^[\w.-]+\/[\w.-]+$/.test(state.repo)) throw new Error('Enter the repository as owner/name.')
+  if (!/^[\w.-]+\/[\w.-]+$/.test(state.repo)) throw new Error(t('Enter the repository as owner/name.'))
   const all: Array<Issue> = []
   for (let page = 1; page <= 10; page += 1) {
     const res = await fetch(`https://api.github.com/repos/${state.repo}/issues?state=all&per_page=100&page=${page}`, { headers: githubHeaders() })
     if (!res.ok) {
-      if (res.status === 404) throw new Error(`Repository ${state.repo} not found, or private without a token.`)
-      if (res.status === 401) throw new Error('GitHub refused the token.')
-      if (res.status === 403) throw new Error('GitHub rate limit reached. Add a token or retry later.')
-      throw new Error(`GitHub answered ${res.status}.`)
+      if (res.status === 404) throw new Error(t('Repository {repo} not found, or private without a token.', { repo: state.repo }))
+      if (res.status === 401) throw new Error(t('GitHub refused the token.'))
+      if (res.status === 403) throw new Error(t('GitHub rate limit reached. Add a token or retry later.'))
+      throw new Error(t('GitHub answered {status}.', { status: res.status }))
     }
     const batch = (await res.json()) as Array<RawIssue>
     for (const i of batch) if (!i.pull_request) all.push(toIssue(i))
@@ -540,8 +566,8 @@ async function fetchIssues(): Promise<Array<Issue>> {
 // always needs a token (read access to projects).
 async function fetchProject(): Promise<ProjectBoard> {
   const target = parseProjectUrl(state.project)
-  if (!target) throw new Error('Paste the project board address, like https://github.com/orgs/acme/projects/12.')
-  if (!state.token) throw new Error('Reading sprints needs a token that can read projects (classic token: read:project).')
+  if (!target) throw new Error(t('Paste the project board address, like https://github.com/orgs/acme/projects/12.'))
+  if (!state.token) throw new Error(t('Reading sprints needs a token that can read projects (classic token: read:project).'))
   const pages: Array<unknown> = []
   let cursor: string | null = null
   do {
@@ -555,7 +581,7 @@ async function fetchProject(): Promise<ProjectBoard> {
       errors?: Array<{ message: string }>
     }
     const project = body.data && body.data.owner && body.data.owner.projectV2
-    if (!res.ok || !project) throw new Error(`Could not read the project board${body.errors ? `: ${body.errors[0].message}` : '.'}`)
+    if (!res.ok || !project) throw new Error(body.errors ? t('Could not read the project board: {error}', { error: body.errors[0].message }) : t('Could not read the project board.'))
     pages.push(project)
     cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null
   } while (cursor && pages.length < 20)
@@ -589,12 +615,13 @@ async function graphql<T>(query: string, variables: Record<string, unknown>): Pr
     body: JSON.stringify({ query, variables }),
   })
   const body = (await res.json()) as { data?: T; errors?: Array<{ message: string }> }
-  if (!res.ok || body.errors || !body.data) throw new Error(body.errors ? body.errors[0].message : `GitHub answered ${res.status}.`)
+  if (!res.ok || body.errors || !body.data) throw new Error(body.errors ? body.errors[0].message : t('GitHub answered {status}.', { status: res.status }))
   return body.data
 }
 
 // Adds an issue to the project board and sets its starting status, when the
-// board has that status. Returns what was done, for the message.
+// board has that status; an empty status means the board's first one.
+// Returns what was done, for the message.
 async function addToProject(nodeId: string, status: string | null): Promise<string> {
   const target = parseProjectUrl(state.project)
   if (!target) return ''
@@ -607,28 +634,29 @@ async function addToProject(nodeId: string, status: string | null): Promise<stri
     'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }',
     { project: project.id, content: nodeId },
   )
-  if (!status) return ' Added to the board.'
-  const option = project.field && project.field.options.find((o) => o.name.toLowerCase() === status.toLowerCase())
-  if (!project.field || !option) return ` Added to the board, without status: it has no "${status}" status.`
+  const option = project.field && (status ? project.field.options.find((o) => o.name.toLowerCase() === status.toLowerCase()) : project.field.options[0])
+  if (!project.field || !option) {
+    return status ? t('Added to the board, without status: it has no "{status}" status.', { status }) : t('Added to the board, without status: it has no Status field.')
+  }
   await graphql(
     'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
     { project: project.id, item: added.addProjectV2ItemById.item.id, field: project.field.id, option: option.id },
   )
-  return ` Added to the board in ${option.name}.`
+  return t('Added to the board in {status}.', { status: option.name })
 }
 
 // Sets the size of an issue on the project board, the product manager's
 // field. The issue is added to the board first if it is not on it yet.
 async function setSize(number: number, size: string | null) {
   mustBeAllowed('size')
-  if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
+  if (!state.writeAllowed) throw new Error(t('Changes to {repo} are not allowed. Turn them on in the GitHub tab.', { repo: state.repo }))
   const board = state.board
-  if (!board || !board.id || !board.sizeField) throw new Error('The project board has no size field.')
+  if (!board || !board.id || !board.sizeField) throw new Error(t('The project board has no size field.'))
   const key = `${state.repo}#${number}`.toLowerCase()
   let item = board.itemIds[key]
   if (!item) {
     const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${number}`, { headers: githubHeaders() })
-    if (!res.ok) throw new Error(`GitHub answered ${res.status} for #${number}.`)
+    if (!res.ok) throw new Error(t('GitHub answered {status} for #{n}.', { status: res.status, n: number }))
     const issue = (await res.json()) as { node_id: string }
     const added = await graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
       'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }',
@@ -646,7 +674,7 @@ async function setSize(number: number, size: string | null) {
     })
   } else {
     const option = field.options.find((o) => o.name === size)
-    if (!option) throw new Error(`The board has no size "${size}".`)
+    if (!option) throw new Error(t('The board has no size "{size}".', { size }))
     await graphql(
       'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
       { project: board.id, item, field: field.id, option: option.id },
@@ -655,7 +683,7 @@ async function setSize(number: number, size: string | null) {
   const issue = state.issues && state.issues.find((i) => i.number === number)
   if (issue) issue.size = size || undefined
   publish()
-  emit<StatusHandler>('STATUS', { state: 'ok', text: size ? `#${number} is now size ${size}.` : `#${number} has no size now.` })
+  emit<StatusHandler>('STATUS', { state: 'ok', text: size ? t('#{n} is now size {size}.', { n: number, size }) : t('#{n} has no size now.', { n: number }) })
 }
 
 // Publishes one sticky as an issue: the issue, its place under its parent,
@@ -663,13 +691,13 @@ async function setSize(number: number, size: string | null) {
 // writing to this repository.
 async function createIssue(id: string, title: string, text: string): Promise<{ issue: Issue; note: string; problems: Array<string> }> {
   mustBeAllowed('create')
-  if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
-  if (!state.token) throw new Error('Publishing needs a token that can write issues.')
-  if (!state.backlog || !state.meta) throw new Error('Compare with GitHub first.')
+  if (!state.writeAllowed) throw new Error(t('Changes to {repo} are not allowed. Turn them on in the GitHub tab.', { repo: state.repo }))
+  if (!state.token) throw new Error(t('Publishing needs a token that can write issues.'))
+  if (!state.backlog || !state.meta) throw new Error(t('Compare with GitHub first.'))
   const draft = draftIssue(id, state.backlog, state.matches, state.meta, state.publishing)
-  if (!draft) throw new Error('This sticky is already an issue.')
+  if (!draft) throw new Error(t('This sticky is already an issue.'))
   const name = title.trim() || draft.title
-  emit<StatusHandler>('STATUS', { state: 'loading', text: `Creating "${name}" in ${state.repo}…` })
+  emit<StatusHandler>('STATUS', { state: 'loading', text: t('Creating "{title}" in {repo}…', { title: name, repo: state.repo }) })
   const res = await fetch(`https://api.github.com/repos/${state.repo}/issues`, {
     method: 'POST',
     headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
@@ -683,11 +711,11 @@ async function createIssue(id: string, title: string, text: string): Promise<{ i
   })
   if (!res.ok) {
     const detail = ((await res.json().catch(() => ({}))) as { message?: string }).message
-    throw new Error(`GitHub refused the issue (${res.status}${detail ? `: ${detail}` : ''}).`)
+    throw new Error(detail ? t('GitHub refused the issue ({status}: {detail}).', { status: res.status, detail }) : t('GitHub refused the issue ({status}).', { status: res.status }))
   }
   const made = (await res.json()) as RawIssue & { id: number; node_id: string }
   writeLink(id, made.number)
-  let note = `#${made.number} created.`
+  let note = t('#{n} created.', { n: made.number })
   const problems: Array<string> = []
   if (draft.parent && draft.parent.number) {
     const sub = await fetch(`https://api.github.com/repos/${state.repo}/issues/${draft.parent.number}/sub_issues`, {
@@ -695,14 +723,15 @@ async function createIssue(id: string, title: string, text: string): Promise<{ i
       headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ sub_issue_id: made.id }),
     })
-    if (sub.ok) note += ` Sub-issue of #${draft.parent.number}.`
-    else problems.push(`not made a sub-issue of #${draft.parent.number} (GitHub answered ${sub.status})`)
+    if (sub.ok) note += ` ${t('Sub-issue of #{n}.', { n: draft.parent.number })}`
+    else problems.push(t('not made a sub-issue of #{n} (GitHub answered {status})', { n: draft.parent.number, status: sub.status }))
   }
   if (state.project) {
     try {
-      note += await addToProject(made.node_id, draft.status)
+      const added = await addToProject(made.node_id, draft.status)
+      if (added) note += ` ${added}`
     } catch (err) {
-      problems.push(`not added to the board (${err instanceof Error ? err.message : String(err)})`)
+      problems.push(t('not added to the board ({error})', { error: err instanceof Error ? err.message : String(err) }))
     }
   }
   // The plugin knows the new issue at once, so the next sticky of a batch
@@ -727,7 +756,7 @@ async function refreshAfter(created: Array<Issue>) {
 async function publishSticky(id: string, title: string, text: string) {
   const { issue, note, problems } = await createIssue(id, title, text)
   await refreshAfter([issue])
-  emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? `${note} But ${problems.join(', ')}.` : note })
+  emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? t('{note} But {problems}.', { note, problems: problems.join(', ') }) : note })
 }
 
 // Publishes a batch the team reviewed, parents first, one at a time; stops
@@ -739,22 +768,29 @@ async function publishMany(ids: Array<string>) {
   const problems: Array<string> = []
   try {
     for (const [n, id] of order.entries()) {
-      emit<StatusHandler>('STATUS', { state: 'loading', text: `Creating ${n + 1} of ${order.length}…` })
+      emit<StatusHandler>('STATUS', { state: 'loading', text: t('Creating {n} of {total}…', { n: n + 1, total: order.length }) })
       const result = await createIssue(id, '', '')
       created.push(result.issue)
       problems.push(...result.problems.map((p) => `#${result.issue.number} ${p}`))
     }
   } catch (err) {
     await refreshAfter(created)
-    const done = created.length ? `${created.length} created (${created.map((i) => `#${i.number}`).join(', ')}), then s` : 'S'
-    emit<StatusHandler>('STATUS', { state: 'error', text: `${done}topped: ${err instanceof Error ? err.message : String(err)}` })
+    const error = err instanceof Error ? err.message : String(err)
+    const list = created.map((i) => `#${i.number}`).join(', ')
+    emit<StatusHandler>('STATUS', {
+      state: 'error',
+      text: created.length
+        ? plural(created.length, '{n} issue created ({list}), then stopped: {error}', '{n} issues created ({list}), then stopped: {error}', { list, error })
+        : t('Stopped: {error}', { error }),
+    })
     return
   }
   await refreshAfter(created)
   const list = created.map((i) => `#${i.number}`).join(', ')
+  const done = plural(created.length, '{n} issue created: {list}.', '{n} issues created: {list}.', { list })
   emit<StatusHandler>('STATUS', {
     state: problems.length ? 'warn' : 'ok',
-    text: `${created.length} issues created: ${list}.${problems.length ? ` But ${problems.join('; ')}.` : ''}`,
+    text: problems.length ? t('{note} But {problems}.', { note: done, problems: problems.join('; ') }) : done,
   })
 }
 
@@ -895,7 +931,7 @@ async function signIn() {
   sendAuth({ state: 'starting' })
   const code = await relay('/device/code')
   if (run !== signInRun) return
-  if (!code.device_code) throw new Error(`GitHub did not start the sign-in (${String(code.error || 'no answer')}).`)
+  if (!code.device_code) throw new Error(t('GitHub did not start the sign-in ({error}).', { error: String(code.error || t('no answer')) }))
   const url = String(code.verification_uri)
   sendAuth({ state: 'code', userCode: String(code.user_code), url })
   let interval = Number(code.interval || 5) * 1000
@@ -916,17 +952,17 @@ async function signIn() {
       interval = Number(answer.interval || interval / 1000 + 5) * 1000
       continue
     }
-    if (error === 'access_denied') return sendAuth({ state: 'error', error: 'Sign-in was cancelled on GitHub.' })
-    return sendAuth({ state: 'error', error: `GitHub stopped the sign-in (${error || 'no answer'}).` })
+    if (error === 'access_denied') return sendAuth({ state: 'error', error: t('Sign-in was cancelled on GitHub.') })
+    return sendAuth({ state: 'error', error: t('GitHub stopped the sign-in ({error}).', { error: error || t('no answer') }) })
   }
-  if (run === signInRun) sendAuth({ state: 'error', error: 'The code expired. Start again.' })
+  if (run === signInRun) sendAuth({ state: 'error', error: t('The code expired. Start again.') })
 }
 
 // Keeps a token, from the sign-in or pasted, and finds whose it is.
 // A token GitHub refuses is never saved.
 async function useToken(token: string) {
   const res = await fetch('https://api.github.com/user', { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` } })
-  if (!res.ok) throw new Error('GitHub refused this token.')
+  if (!res.ok) throw new Error(t('GitHub refused this token.'))
   state.token = token
   state.login = ((await res.json()) as { login: string }).login
   await figma.clientStorage.setAsync('token', token)
@@ -985,13 +1021,13 @@ async function selectRepo(repo: string) {
 // Reads the issues of the connected repository, and the sprints of its
 // project board when one is named, then shows the result.
 async function compare() {
-  emit<StatusHandler>('STATUS', { state: 'loading', text: `Reading issues of ${state.repo}…` })
+  emit<StatusHandler>('STATUS', { state: 'loading', text: t('Reading issues of {repo}…', { repo: state.repo }) })
   state.issues = await fetchIssues()
   state.meta = await fetchMeta()
   // Listing the owner's issue types needs read:org; the types the issues
   // already use are known without it.
   for (const i of state.issues) if (i.type && !state.meta.types.includes(i.type)) state.meta.types.push(i.type)
-  let note = `${state.issues.length} issues read from ${state.repo}.`
+  let note = plural(state.issues.length, '{n} issue read from {repo}.', '{n} issues read from {repo}.', { repo: state.repo })
   let warn = false
   state.sprints = []
   state.board = null
@@ -1001,10 +1037,10 @@ async function compare() {
       state.issues = withProject(state.issues, board)
       state.sprints = board.sprints
       state.board = board
-      note += ` Sprints read from "${board.title}" (${board.sprints.length}).`
+      note += ` ${t('Sprints read from "{board}" ({n}).', { board: board.title, n: board.sprints.length })}`
     } catch (err) {
       warn = true
-      note += ` Sprints not read: ${err instanceof Error ? err.message : String(err)}`
+      note += ` ${t('Sprints not read: {error}', { error: err instanceof Error ? err.message : String(err) })}`
     }
   }
   state.readAt = Date.now()
@@ -1017,8 +1053,11 @@ async function compare() {
 const fail =(err: unknown) => emit<StatusHandler>('STATUS', { state: 'error', text: err instanceof Error ? err.message : String(err) })
 
 export default function () {
-  on<ReadyHandler>('READY', () => {
+  on<ReadyHandler>('READY', (navigatorLanguage) => {
+    state.navigatorLanguage = navigatorLanguage || ''
     void (async () => {
+      // The language first, so every message below comes out in it.
+      await loadLang()
       readBoard()
       await loadSettings()
       publish()
@@ -1111,7 +1150,7 @@ export default function () {
     void (async () => {
       const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${number}/events?per_page=100`, { headers: githubHeaders() })
       const lines = res.ok ? explainEvents((await res.json()) as Array<unknown>, kind) : null
-      emit<WhyResultHandler>('WHY_RESULT', key, lines, res.ok ? null : `GitHub answered ${res.status}.`)
+      emit<WhyResultHandler>('WHY_RESULT', key, lines, res.ok ? null : t('GitHub answered {status}.', { status: res.status }))
     })().catch(fail)
   })
 
@@ -1140,7 +1179,7 @@ export default function () {
       await figma.clientStorage.deleteAsync('token')
       await figma.clientStorage.deleteAsync('login')
       publish()
-      emit<StatusHandler>('STATUS', { state: 'ok', text: 'Signed out. The token is forgotten on this computer.' })
+      emit<StatusHandler>('STATUS', { state: 'ok', text: t('Signed out. The token is forgotten on this computer.') })
     })().catch(fail)
   })
 
@@ -1159,6 +1198,14 @@ export default function () {
     if (!state.repo) return
     state.publishing = { ...state.publishing, ...change }
     void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
+  })
+
+  on<SetLangHandler>('SET_LANG', (setting) => {
+    void (async () => {
+      await figma.clientStorage.setAsync('lang', setting)
+      await loadLang()
+      publish()
+    })().catch(fail)
   })
 
   on<SetRoleHandler>('SET_ROLE', (role) => {

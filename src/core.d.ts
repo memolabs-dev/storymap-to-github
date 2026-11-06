@@ -132,6 +132,8 @@ export interface Drift {
   github: string
   // What the map wants: the sticky's title, its release, or its parent's number.
   target?: string | number | null
+  // What identifies the difference, made from the English texts (see driftKey).
+  key?: string
 }
 
 export interface DriftReport {
@@ -154,6 +156,8 @@ export interface ProjectBoard {
   items: Record<string, { sprint?: Sprint; status?: string; size?: string }>
   // The field that holds sizes, when the board has one, and each card's id.
   sizeField: SelectField | null
+  // The options of the Status field, in the board's order.
+  statusOptions: Array<string>
   itemIds: Record<string, string>
 }
 
@@ -181,7 +185,8 @@ export interface Publishing {
   bodyTemplate?: string
 }
 
-export declare const DEFAULT_BODY: string
+// The text a new issue starts with by default, in the language shown.
+export declare function defaultBody(): string
 
 export interface IssueDraft {
   id: string

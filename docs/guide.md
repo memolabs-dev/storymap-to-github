@@ -2,7 +2,7 @@
 
 The plugin sits next to your story map in FigJam. It reads the map, shows the GitHub backlog it is or will become, and lets you act on GitHub from the board. Nothing is written to GitHub until you click, and only where the team allowed it.
 
-Installing it and connecting GitHub: see [install.md](install.md).
+Installing it and connecting GitHub: see [install.md](install.md). [Version française](fr/guide.md)
 
 ## The four tabs
 
@@ -38,7 +38,9 @@ The tree shows epics, features with their steps, tasks and sub-tasks. Each line 
 - `#19?` in orange: issue 19 has a close title. Open the card to confirm or pick another.
 - `New`: not on GitHub yet.
 
-Hovering a line selects its sticky on the board; clicking it zooms there and opens its card. Above the tree: the counts, how many stickies are linked, and filters by release and by sprint.
+A linked task also shows its **sprint** and its **status**, that is its column on the project board: `Ready`, `In progress`, `In review`, `Done`, with the names your board uses. A closed issue is marked **Closed**.
+
+Hovering a line selects its sticky on the board; clicking it zooms there and opens its card. Above the tree: the counts, how many stickies are linked, and filters by release, by sprint and by status.
 
 **Labels on the board.** The Labels switch puts a small label in the corner of each linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves and change when the issue changes.
 
@@ -98,11 +100,12 @@ Who does what is a setting of the whole team, under **More settings**. By defaul
 
 ## More settings
 
-Under **More settings** in the GitHub tab, for each repository:
+Under **More settings** in the GitHub tab:
 
+- **Language**: automatic, English or French, for you.
 - **Who does what**, for the whole team.
 - **The label of a new issue**, `needs-refinement` by default, empty for none.
-- **The status of a new issue** on the project board, `Backlog` by default.
+- **The status of a new issue** on the project board; empty means the board's first status.
 - **The text of a new issue**, with `{title}`, `{parent}`, `{release}` and `{steps}` filled in.
 
 ## Good to know

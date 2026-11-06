@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as core from '../src/core.js';
+import * as i18n from '../src/i18n.js';
 
 const YELLOW = { r: 1, g: 0.85, b: 0.4 };
 const BLUE = { r: 0.46, g: 0.76, b: 1 };
@@ -514,4 +516,122 @@ test('the starting template is a story map the plugin reads by rows', () => {
   assert.equal(b.stats.tasks, 2);
   assert.deepEqual(b.milestones, ['Release 1', 'Release 2']);
   assert.equal(b.notes.length, 1);
+});
+
+// English and French. Every French test puts English back when it ends.
+const inFrench = (fn) => {
+  i18n.setLang('fr');
+  try {
+    fn();
+  } finally {
+    i18n.setLang('en');
+  }
+};
+
+test('the language follows the setting, or the system when automatic', () => {
+  assert.equal(i18n.resolveLang('auto', 'fr-FR'), 'fr');
+  assert.equal(i18n.resolveLang('auto', 'en-US'), 'en');
+  assert.equal(i18n.resolveLang('auto', ''), 'en');
+  assert.equal(i18n.resolveLang('en', 'fr-FR'), 'en', 'an explicit choice wins');
+  assert.equal(i18n.resolveLang('fr', 'en-GB'), 'fr');
+});
+
+test('plural forms are right in both languages', () => {
+  assert.equal(i18n.plural(1, '{n} epic', '{n} epics'), '1 epic');
+  assert.equal(i18n.plural(2, '{n} epic', '{n} epics'), '2 epics');
+  assert.equal(i18n.plural(0, '{n} epic', '{n} epics'), '0 epics');
+  inFrench(() => {
+    assert.equal(i18n.plural(1, '{n} epic', '{n} epics'), '1 épopée');
+    assert.equal(i18n.plural(2, '{n} epic', '{n} epics'), '2 épopées');
+    assert.equal(i18n.plural(0, '{n} epic', '{n} epics'), '0 épopée', 'French takes the singular for 0');
+    assert.equal(i18n.plural(3, 'Create {n} issue', 'Create {n} issues'), 'Créer 3 issues');
+  });
+});
+
+test('t() fills placeholders and falls back to English for a missing key', () => {
+  assert.equal(i18n.t('Use {repo}', { repo: 'acme/library' }), 'Use acme/library');
+  inFrench(() => {
+    assert.equal(i18n.t('Use {repo}', { repo: 'acme/library' }), 'Utiliser acme/library');
+    assert.equal(i18n.t('A text nobody translated, {n}', { n: 2 }), 'A text nobody translated, 2');
+    assert.equal(i18n.t('New'), 'Nouvelle');
+    assert.equal(i18n.t('New', undefined, 'sticky'), 'Nouveau', 'a context tells apart two French words');
+    assert.equal(i18n.t('Why?'), 'Pourquoi ?', 'a non-breaking space before ? in French');
+  });
+});
+
+test('a French draft has the French user story and French warnings', () => {
+  const b = core.buildBacklog(board(), legend);
+  const matches = core.matchIssues(b, [{ number: 7, title: 'Find a book' }]);
+  inFrench(() => {
+    const d = core.draftIssue(find(b, 'Back-office').id, b, matches, repoMeta, publishing);
+    assert.match(d.body, /\*\*En tant que\*\*/);
+    assert.match(d.body, /\*\*Je veux\*\* Back-office/);
+    assert.match(d.body, /### Critères d'acceptation/);
+    assert.match(d.body, /Fait partie de : Find a book \(#7\)/);
+    assert.match(d.body, /Release sur la carte : P0 · MVP/);
+    const epic = core.draftIssue(b.epics[0].id, b, core.matchIssues(b, []), repoMeta, publishing);
+    assert.ok(!/Fait partie de/.test(epic.body), 'a line left empty by a placeholder is dropped, with the French colon too');
+    assert.ok(!/Release sur la carte/.test(epic.body));
+    const task = core.draftIssue(find(b, 'Import books from a spreadsheet').id, b, core.matchIssues(b, []), repoMeta, publishing);
+    assert.match(task.warnings[0], /^«\u00a0Add new books\u00a0» n'est pas encore sur GitHub/);
+    assert.match(task.warnings[1], /^Aucun jalon sur GitHub ne correspond à la release «\u00a0P1\u00a0»/);
+  });
+  assert.match(core.defaultBody(), /^\*\*As a\*\*/, 'English again after the French test');
+});
+
+test('a difference kept on purpose stays kept in the other language', () => {
+  const b = core.buildBacklog(board(), legend);
+  const issues = [{ number: 3, title: 'Import books from a spreadsheet', html_url: 'u3', state: 'open', state_reason: null, milestone: null, parent: null }];
+  const matches = core.matchIssues(b, issues, { [find(b, 'Import books from a spreadsheet').id]: 3 });
+  const english = core.findDrift(b, issues, matches).drifts.find((x) => x.kind === 'milestone');
+  assert.equal(english.github, 'No milestone');
+  inFrench(() => {
+    const french = core.findDrift(b, issues, matches).drifts.find((x) => x.kind === 'milestone');
+    assert.equal(french.github, 'Aucun jalon');
+    assert.equal(core.driftKey(french), core.driftKey(english));
+    const kept = { [french.id]: [core.driftKey(english)] };
+    assert.ok(!core.findDrift(b, issues, matches, kept).drifts.some((x) => x.kind === 'milestone'));
+  });
+});
+
+test('the French starting template is read by rows too', () => {
+  inFrench(() => {
+    const shapes = core.starterLayout();
+    n = 0;
+    const items = shapes.map((s) => ({ id: `n${(n += 1)}`, type: s.kind === 'label' ? 'SHAPE_WITH_TEXT' : 'STICKY', text: s.text, fill: s.fill, x: s.x, y: s.y, w: s.w, h: s.h }));
+    const b = core.buildBacklog(items, {});
+    assert.equal(b.mode, 'rows');
+    assert.deepEqual(b.rows.map((r) => r.name), ['Persona', 'Activités', 'Tâches', 'Release 1', 'Release 2']);
+    assert.equal(b.stats.epics, 1);
+    assert.equal(b.stats.tasks, 2);
+  });
+});
+
+test('the project board gives its statuses in order, for the starting status', () => {
+  const page = { ...projectPage, fields: { nodes: [...projectPage.fields.nodes, { id: 'F_status', name: 'Status', options: [{ id: 's1', name: 'Todo' }, { id: 's2', name: 'Done' }] }] } };
+  assert.deepEqual(core.readProject([page]).statusOptions, ['Todo', 'Done']);
+  assert.deepEqual(core.readProject([projectPage]).statusOptions, []);
+});
+
+// Every text the code passes to t() or plural() has a French translation
+// with the same placeholders, French spacing and no long dashes.
+test('every text shown has a French translation', () => {
+  const quoted = String.raw`(['"])((?:\\.|(?!\1)[^\\\n])*)\1`;
+  const second = quoted.replace(/\\1/g, '\\3');
+  const keys = new Set();
+  for (const file of ['core.js', 'main.ts', 'ui.tsx']) {
+    const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+    for (const m of source.matchAll(new RegExp(String.raw`\bt\(\s*` + quoted, 'g'))) keys.add(m[2]);
+    for (const m of source.matchAll(new RegExp(String.raw`\bplural\([^'"]*?` + quoted + String.raw`\s*,\s*` + second, 'g'))) keys.add(m[2]).add(m[4]);
+  }
+  const unescape = (s) => s.replace(/\\(.)/g, '$1');
+  const holes = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
+  assert.ok(keys.size > 200, `found ${keys.size} texts`);
+  const missing = [...keys].map(unescape).filter((k) => !(k in i18n.FR));
+  assert.deepEqual(missing, []);
+  for (const [en, fr] of Object.entries(i18n.FR)) {
+    assert.equal(holes(fr), holes(en.replace(/^\w+:/, '')), `same placeholders: ${en}`);
+    assert.ok(!/ [:;?!»]|« /.test(fr), `non-breaking space in: ${fr}`);
+    assert.ok(!/[\u2013\u2014]/.test(fr), `no long dash in: ${fr}`);
+  }
 });

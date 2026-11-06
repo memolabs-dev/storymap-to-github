@@ -24,8 +24,10 @@ import { emit, on } from '@create-figma-plugin/utilities'
 import { Fragment, h } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 
-import { ACTIONS, DEFAULT_BODY, canDo, draftIssue, driftKey, normalize, suggestIssues } from './core'
+import { ACTIONS, TYPES, canDo, defaultBody, draftIssue, driftKey, normalize, suggestIssues } from './core'
 import type { Action, Drift, Feature, ItemType, MapNode, Role, Task } from './core'
+import { getLang, plural, resolveLang, setLang, t } from './i18n'
+import type { LangSetting } from './i18n'
 import type {
   AddTemplateHandler,
   SetOwnerHandler,
@@ -60,6 +62,7 @@ import type {
   SelectedHandler,
   SetGuideHandler,
   SetLabelsHandler,
+  SetLangHandler,
   SetLegendHandler,
   SetModeHandler,
   SetPublishingHandler,
@@ -74,16 +77,36 @@ import styles from './ui.css'
 
 type Kind = 'epic' | 'feature' | 'step' | 'task' | 'note'
 
+// Texts are written in English and translated by t() when shown (i18n.js),
+// so the lists below hold English and are translated where they are used.
+// The English kind names are also GitHub's issue type names.
 const KIND_LABEL: Record<string, string> = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'Note', ignore: 'Ignore' }
-const TYPE_OPTIONS = (['epic', 'feature', 'step', 'task', 'note', 'ignore'] as Array<ItemType>).map((value) => ({ value, text: KIND_LABEL[value] }))
-const ROLE_NAME: Record<Role, string> = { pm: 'the product manager', techlead: 'the tech lead', both: 'everyone' }
-const ROLE_OPTIONS = [
-  { value: 'pm', text: 'Product manager' },
-  { value: 'techlead', text: 'Tech lead' },
-  { value: 'both', text: 'Everyone' },
+const kindLabel = (kind: string) => t(KIND_LABEL[kind] || kind)
+const typeOptions = () => TYPES.map((value: ItemType) => ({ value, text: kindLabel(value) }))
+const ASK_FOR: Record<Role, string> = {
+  pm: 'This change is for the product manager.',
+  techlead: 'This change is for the tech lead.',
+  both: 'This change is for everyone.',
+}
+const SET_BY: Record<Role, string> = { pm: 'set by the product manager', techlead: 'set by the tech lead', both: 'set by everyone' }
+const roleOptions = () => [
+  { value: 'pm', text: t('Product manager') },
+  { value: 'techlead', text: t('Tech lead') },
+  { value: 'both', text: t('Everyone') },
 ]
 const TAB_NAMES = ['Map', 'Differences', 'Reading', 'GitHub']
 const DRIFT_LABEL: Record<Drift['kind'], string> = { dropped: 'Dropped on GitHub', schedule: 'Planned too late', milestone: 'Milestone', parent: 'Parent', title: 'Title' }
+const LANG_OPTIONS: Array<{ value: LangSetting; text: string }> = [
+  { value: 'auto', text: 'Automatic' },
+  { value: 'en', text: 'English' },
+  { value: 'fr', text: 'Français' },
+]
+// A sticky colour's name, for "3 yellow stickies".
+const HUES = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'violet', 'pink', 'white', 'gray']
+const hueName = (hue: string) => (HUES.includes(hue) ? t(hue) : hue)
+
+// Until the plugin code says which language to show, the system's.
+setLang(resolveLang('auto', navigator.language))
 
 // Where an item sits in the tree, found by its sticky id.
 interface Located {
@@ -151,15 +174,19 @@ function linkProgress(board: BoardPayload) {
   return { linked, total: ids.length }
 }
 
-// "1 epic", "3 epics".
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+// "1 epic, 2 features, 3 tasks".
+const counts = (stats: { epics: number; features: number; tasks: number }) => [
+  plural(stats.epics, '{n} epic', '{n} epics'),
+  plural(stats.features, '{n} feature', '{n} features'),
+  plural(stats.tasks, '{n} task', '{n} tasks'),
+]
 
 // "just now", "3 min ago", "2 h ago".
 function ago(time: number, now: number) {
   const minutes = Math.floor((now - time) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes} min ago`
-  return `${Math.floor(minutes / 60)} h ago`
+  if (minutes < 1) return t('just now')
+  if (minutes < 60) return t('{n} min ago', { n: minutes })
+  return t('{n} h ago', { n: Math.floor(minutes / 60) })
 }
 
 // The getting started guide: four steps, each ticked by what happens on the
@@ -171,49 +198,54 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
   const connected = board.settings.issuesLoaded !== null
   const steps = [
     {
-      title: 'Check how the board is read',
+      title: t('Check how the board is read'),
       done: board.guide.readingConfirmed,
       body: (
         <Fragment>
           <p class={styles.help}>
-            Read {b.mode === 'rows' ? "by rows, as in Figma's story map template" : 'by sticky colours'}: {count(b.stats.epics, 'epic', 'epics')}, {count(b.stats.features, 'feature', 'features')}, {count(b.stats.tasks, 'task', 'tasks')}
-            {b.milestones.length ? `, releases ${b.milestones.join(', ')}` : ', no releases'}.
+            {t(b.mode === 'rows' ? "Read by rows, as in Figma's story map template: {counts}" : 'Read by sticky colours: {counts}', { counts: counts(b.stats).join(', ') })}
+            {b.milestones.length ? t(', releases {list}.', { list: b.milestones.join(', ') }) : t(', no releases.')}
           </p>
           <div class={styles.actions}>
-            <Button onClick={() => emit<SetGuideHandler>('SET_GUIDE', { readingConfirmed: true })}>That's right</Button>
-            <Button secondary onClick={() => props.goTo('Reading')}>Adjust</Button>
+            <Button onClick={() => emit<SetGuideHandler>('SET_GUIDE', { readingConfirmed: true })}>{t("That's right")}</Button>
+            <Button secondary onClick={() => props.goTo('Reading')}>{t('Adjust')}</Button>
           </div>
         </Fragment>
       ),
     },
     {
-      title: 'Connect GitHub',
+      title: t('Connect GitHub'),
       done: connected,
       body: connected ? (
-        <p class={styles.help}>Connected to {board.settings.repo}{board.readAt ? `, updated ${ago(board.readAt, props.now)}` : ''}.</p>
+        <p class={styles.help}>
+          {board.readAt
+            ? t('Connected to {repo}, updated {ago}.', { repo: board.settings.repo, ago: ago(board.readAt, props.now) })
+            : t('Connected to {repo}.', { repo: board.settings.repo })}
+        </p>
       ) : (
         <Fragment>
-          <p class={styles.help}>Name the repository where the team's issues live. The plugin reads them again every time it opens.</p>
-          <div class={styles.actions}><Button onClick={() => props.goTo('GitHub')}>Connect</Button></div>
+          <p class={styles.help}>{t("Name the repository where the team's issues live. The plugin reads them again every time it opens.")}</p>
+          <div class={styles.actions}><Button onClick={() => props.goTo('GitHub')}>{t('Connect')}</Button></div>
         </Fragment>
       ),
     },
     {
-      title: 'Link your stickies to their issues',
+      title: t('Link your stickies to their issues'),
       done: connected && progress.linked > 0,
       body: (
         <p class={styles.help}>
-          {connected ? `${progress.linked} of ${progress.total} linked. ` : ''}Click a sticky on the board: its card shows the issues it most likely is.
+          {connected ? `${t('{n} of {total} linked.', { n: progress.linked, total: progress.total })} ` : ''}
+          {t('Click a sticky on the board: its card shows the issues it most likely is.')}
         </p>
       ),
     },
     {
-      title: 'Show labels on the board',
+      title: t('Show labels on the board'),
       done: board.labelsOn,
       body: connected ? (
-        <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>Labels on the board</Toggle>
+        <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>{t('Labels on the board')}</Toggle>
       ) : (
-        <p class={styles.help}>Once connected, each linked sticky can show its issue number, sprint and status.</p>
+        <p class={styles.help}>{t('Once connected, each linked sticky can show its issue number, sprint and status.')}</p>
       ),
     },
   ]
@@ -224,11 +256,11 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
   return (
     <div class={styles.guide}>
       <div class={styles.guideHead}>
-        <span class={styles.guideCount}>Get started · {current + 1} of {steps.length}</span>
+        <span class={styles.guideCount}>{t('Get started · {n} of {total}', { n: current + 1, total: steps.length })}</span>
         <span class={styles.guideDots}>
           {steps.map((s, i) => <span key={s.title} class={`${styles.guideDot} ${s.done ? styles.guideDotDone : i === current ? styles.guideDotNow : ''}`} />)}
         </span>
-        <IconButton onClick={() => emit<SetGuideHandler>('SET_GUIDE', { hidden: true })} title="Hide the guide">
+        <IconButton onClick={() => emit<SetGuideHandler>('SET_GUIDE', { hidden: true })} title={t('Hide the guide')}>
           <IconClose16 />
         </IconButton>
       </div>
@@ -244,7 +276,7 @@ function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
   const pill = (cls: string, text: string, tip: string) => (
     <button
       class={`${styles.pill} ${cls}`}
-      title={`${tip}. Click to change.`}
+      title={t('{tip}. Click to change.', { tip })}
       onClick={(e) => {
         e.stopPropagation()
         props.onOpen()
@@ -253,10 +285,11 @@ function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
       {text}
     </button>
   )
-  if (m.status === 'linked') return pill(styles.pillExists, `#${m.number}`, `Linked to: ${m.title}`)
-  if (m.status === 'exists') return pill(styles.pillExists, `#${m.number}`, `Same title as: ${m.title}`)
-  if (m.status === 'maybe') return pill(styles.pillMaybe, `#${m.number}?`, `Close to: ${m.title}`)
-  return pill(styles.pillNew, 'New', m.confirmed ? 'Marked as not on GitHub yet' : 'No issue with a close title')
+  if (m.status === 'linked') return pill(styles.pillExists, `#${m.number}`, t('Linked to: {title}', { title: m.title }))
+  if (m.status === 'exists') return pill(styles.pillExists, `#${m.number}`, t('Same title as: {title}', { title: m.title }))
+  if (m.status === 'maybe') return pill(styles.pillMaybe, `#${m.number}?`, t('Close to: {title}', { title: m.title }))
+  // "New" on a sticky with no issue yet: not the same word in French as a new issue.
+  return pill(styles.pillNew, t('New', undefined, 'sticky'), m.confirmed ? t('Marked as not on GitHub yet') : t('No issue with a close title'))
 }
 
 function Plugin() {
@@ -304,6 +337,8 @@ function Plugin() {
   useEffect(() => {
     const offs = [
       on<BoardHandler>('BOARD', (next) => {
+        // The language first, so this render already shows it.
+        setLang(next.settings.lang)
         setBoard(next)
         setRepo((r) => r || next.settings.repo)
         setProject((p) => p || next.settings.project)
@@ -321,16 +356,16 @@ function Plugin() {
         if (id) setTab('Map')
       }),
     ]
-    emit<ReadyHandler>('READY')
+    emit<ReadyHandler>('READY', navigator.language)
     return () => offs.forEach((off) => off())
   }, [])
 
-  if (!board) return <div class={styles.empty}>Reading the board…</div>
+  if (!board) return <div class={styles.empty}>{t('Reading the board…')}</div>
 
   const b = board.backlog
   // Whether this person's role makes this change; if not, who to ask.
   const may = (action: Action) => canDo(board.settings.role, action, board.settings.owners)
-  const askFor = (action: Action) => <span class={styles.help}>This change is for {ROLE_NAME[board.settings.owners[action]]}.</span>
+  const askFor = (action: Action) => <span class={styles.help}>{t(ASK_FOR[board.settings.owners[action]])}</span>
   const focus = (id: string, zoom: boolean) => emit<FocusHandler>('FOCUS', id, zoom)
   const open = (id: string) => {
     setSelected(id)
@@ -352,7 +387,7 @@ function Plugin() {
 
   const row = (item: MapNode & Partial<Task>, kind: Kind) => {
     const issue = kind === 'task' ? issueOf(board, item.id) : null
-    const tip = issue ? [issue.status, issue.size && `size ${issue.size}`, issue.assignees.length ? `@${issue.assignees.join(', @')}` : ''].filter(Boolean).join(', ') : ''
+    const tip = issue ? [issue.status, issue.size && t('size {size}', { size: issue.size }), issue.assignees.length ? `@${issue.assignees.join(', @')}` : ''].filter(Boolean).join(', ') : ''
     return (
       <div
         class={`${styles.row} ${selected === item.id ? styles.rowSelected : ''}`}
@@ -366,8 +401,8 @@ function Plugin() {
           }
         }}
       >
-        <span class={`${styles.dot} ${styles[kind]}`} title={KIND_LABEL[kind]} />
-        <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={`${KIND_LABEL[kind]}: ${item.title}`}>
+        <span class={`${styles.dot} ${styles[kind]}`} title={kindLabel(kind)} />
+        <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={t('{kind}: {title}', { kind: kindLabel(kind), title: item.title })}>
           {item.title}
         </span>
         {item.release ? <span class={`${styles.pill} ${styles.pillMilestone}`}>{item.release}</span> : null}
@@ -393,7 +428,7 @@ function Plugin() {
     return (
       <li key={f.id}>
         {row(f, 'feature')}
-        {f.steps.length ? <div class={styles.steps}>Steps: {f.steps.map((s) => s.title).join(' · ')}</div> : null}
+        {f.steps.length ? <div class={styles.steps}>{t('Steps: {list}', { list: f.steps.map((s) => s.title).join(' · ') })}</div> : null}
         {tasks.length ? <ul>{tasks.map(taskTree)}</ul> : null}
       </li>
     )
@@ -407,10 +442,10 @@ function Plugin() {
       return (
         <div class={styles.card}>
           <div class={styles.cardHead}>
-            <span class={styles.cardTitle}>Not part of the map</span>
-            <button class={styles.close} onClick={() => setSelected(null)} aria-label="Close">✕</button>
+            <span class={styles.cardTitle}>{t('Not part of the map')}</span>
+            <button class={styles.close} onClick={() => setSelected(null)} aria-label={t('Close')}>✕</button>
           </div>
-          <p class={styles.help}>This node is a label, a legend sticky, or a colour or row the map ignores. Change that in Reading.</p>
+          <p class={styles.help}>{t('This node is a label, a legend sticky, or a colour or row the map ignores. Change that in Reading.')}</p>
         </div>
       )
     }
@@ -428,17 +463,16 @@ function Plugin() {
         <div class={styles.cardHead}>
           <span class={`${styles.dot} ${styles[kind]}`} />
           <span class={styles.cardTitle}>{item.title}</span>
-          <button class={styles.close} onClick={() => setSelected(null)} aria-label="Close">✕</button>
+          <button class={styles.close} onClick={() => setSelected(null)} aria-label={t('Close')}>✕</button>
         </div>
         <div class={styles.cardMeta}>
-          {KIND_LABEL[kind]}
-          {parent ? ` in ${parent}` : ''}
+          {parent ? t('{kind} in {parent}', { kind: kindLabel(kind), parent }) : kindLabel(kind)}
           {item.release ? ` · ${item.release}` : ''}
         </div>
-        {!canLink ? <p class={styles.help}>{kind === 'step' ? 'Steps are written in their feature, not as issues.' : 'Notes stay on the board, not on GitHub.'}</p> : null}
+        {!canLink ? <p class={styles.help}>{kind === 'step' ? t('Steps are written in their feature, not as issues.') : t('Notes stay on the board, not on GitHub.')}</p> : null}
         {canLink && board.settings.issuesLoaded === null ? (
           <p class={styles.help}>
-            Connect a repository in <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button> to see this sticky's issue.
+            {t('Connect a repository in')} <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button> {t("to see this sticky's issue.")}
           </p>
         ) : null}
         {canLink && issue ? (
@@ -447,17 +481,22 @@ function Plugin() {
               #{issue.number} {issue.title}
             </button>
             <div class={styles.cardMeta}>
-              {[issue.state === 'closed' ? 'Closed' : issue.status || 'Open', issue.sprint, issue.size && `size ${issue.size}`, issue.assignees.length ? `@${issue.assignees.join(', @')}` : 'no one assigned']
+              {[
+                issue.state === 'closed' ? t('Closed') : issue.status || t('Open'),
+                issue.sprint,
+                issue.size && t('size {size}', { size: issue.size }),
+                issue.assignees.length ? `@${issue.assignees.join(', @')}` : t('no one assigned'),
+              ]
                 .filter(Boolean)
                 .join(' · ')}
             </div>
             {board.settings.sizeOptions ? (
               <div class={styles.sizeRow}>
-                <span class={styles.fieldLabel}>Size</span>
+                <span class={styles.fieldLabel}>{t('Size')}</span>
                 {board.settings.writeAllowed && may('size') ? (
                   <SegmentedControl
                     value={issue.size || 'none'}
-                    options={[{ value: 'none', children: 'None' }, ...board.settings.sizeOptions.map((o) => ({ value: o, children: o }))]}
+                    options={[{ value: 'none', children: t('None', undefined, 'size') }, ...board.settings.sizeOptions.map((o) => ({ value: o, children: o }))]}
                     onValueChange={(v: string) => {
                       setPublishedFrom(item.id)
                       emit<SetSizeHandler>('SET_SIZE', issue.number, v === 'none' ? null : v)
@@ -465,36 +504,36 @@ function Plugin() {
                   />
                 ) : (
                   <span>
-                    {issue.size || 'No size'}
-                    {board.settings.writeAllowed ? <span class={styles.help}> · set by {ROLE_NAME[board.settings.owners.size]}</span> : null}
+                    {issue.size || t('No size')}
+                    {board.settings.writeAllowed ? <span class={styles.help}> · {t(SET_BY[board.settings.owners.size])}</span> : null}
                   </span>
                 )}
               </div>
             ) : null}
             <div class={styles.actions}>
-              <Button secondary onClick={() => linkTo(0)}>Not this issue</Button>
+              <Button secondary onClick={() => linkTo(0)}>{t('Not this issue')}</Button>
             </div>
           </div>
         ) : null}
         {canLink && !issue && board.issues.length ? (
           <Fragment>
-            <p class={styles.question}>{m && m.confirmed ? 'Marked as not on GitHub yet.' : 'Already on GitHub? Pick its issue'}</p>
+            <p class={styles.question}>{m && m.confirmed ? t('Marked as not on GitHub yet.') : t('Already on GitHub? Pick its issue')}</p>
             {candidates.map((c) => (
               <button key={c.number} class={styles.candidate} onClick={() => linkTo(c.number)}>
                 #{c.number} {c.title}
-                <span class={styles.candidateWhy}>{c.score > 1 ? 'Same title' : `Words in common: ${sharedWords(c.title, c.shared)}`}</span>
+                <span class={styles.candidateWhy}>{c.score > 1 ? t('Same title') : t('Words in common: {words}', { words: sharedWords(c.title, c.shared) })}</span>
               </button>
             ))}
-            {!candidates.length ? <p class={styles.help}>No issue has a close title.</p> : null}
-            <SearchTextbox value={search} onValueInput={setSearch} placeholder="Search another issue" />
+            {!candidates.length ? <p class={styles.help}>{t('No issue has a close title.')}</p> : null}
+            <SearchTextbox value={search} onValueInput={setSearch} placeholder={t('Search another issue')} />
             {searched.map((i) => (
               <button key={i.number} class={styles.candidate} onClick={() => linkTo(i.number)}>
                 #{i.number} {i.title}
               </button>
             ))}
             <div class={styles.actions}>
-              {!(m && m.confirmed) ? <Button secondary onClick={() => linkTo(0)}>None of these</Button> : null}
-              {m && (m.status === 'linked' || m.confirmed) ? <Button secondary onClick={() => linkTo(null)}>Guess from the title</Button> : null}
+              {!(m && m.confirmed) ? <Button secondary onClick={() => linkTo(0)}>{t('None of these')}</Button> : null}
+              {m && (m.status === 'linked' || m.confirmed) ? <Button secondary onClick={() => linkTo(null)}>{t('Guess from the title')}</Button> : null}
             </div>
           </Fragment>
         ) : null}
@@ -508,7 +547,7 @@ function Plugin() {
   // anything is written. Publishing is off until the team allows it for
   // this repository in the GitHub tab.
   const publishBox = (id: string) => {
-    const { meta, publishing, writeAllowed, repo: repoName, project: projectUrl } = board.settings
+    const { meta, publishing, writeAllowed, repo: repoName, project: projectUrl, statusOptions } = board.settings
     if (!meta) return null
     const draft = draftIssue(id, b, board.matches, meta, publishing)
     if (!draft) return null
@@ -516,18 +555,23 @@ function Plugin() {
     const title = draftTitle || draft.title
     const text = draftBody || draft.body
     const lines: Array<[string, string]> = [
-      ['Type', draft.type ? draft.type : `label "${draft.kind}" (no ${KIND_LABEL[draft.kind]} type here)`],
-      ['Parent', draft.parent ? (draft.parent.number ? `#${draft.parent.number} ${draft.parent.title}` : `${draft.parent.title}, not on GitHub yet`) : 'None'],
-      ['Milestone', draft.milestone ? draft.milestone.title : 'None'],
-      ['Labels', draft.labels.length ? draft.labels.join(', ') : 'None'],
+      [t('Type'), draft.type ? draft.type : t('label "{label}" (no {type} type here)', { label: draft.kind, type: KIND_LABEL[draft.kind] })],
+      [
+        t('Parent'),
+        draft.parent ? (draft.parent.number ? `#${draft.parent.number} ${draft.parent.title}` : t('{title}, not on GitHub yet', { title: draft.parent.title })) : t('None'),
+      ],
+      [t('Milestone'), draft.milestone ? draft.milestone.title : t('None')],
+      [t('Labels'), draft.labels.length ? draft.labels.join(', ') : t('None')],
     ]
-    if (projectUrl) lines.push(['On the board', draft.status || 'Added, without status'])
+    // No starting status set: the issue goes to the board's first status.
+    const firstStatus = statusOptions && statusOptions.length ? statusOptions[0] : null
+    if (projectUrl) lines.push([t('On the board'), draft.status || firstStatus || t('Added, without status')])
     return (
       <div class={styles.publish}>
-        <p class={styles.question}>Not yet? Create its issue in {repoName}</p>
-        <span class={styles.fieldLabel}>Title</span>
+        <p class={styles.question}>{t('Not yet? Create its issue in {repo}', { repo: repoName })}</p>
+        <span class={styles.fieldLabel}>{t('Title')}</span>
         <Textbox value={title} onValueInput={setDraftTitle} spellCheck={false} />
-        <span class={styles.fieldLabel} style={{ marginTop: 8 }}>Story and acceptance criteria</span>
+        <span class={styles.fieldLabel} style={{ marginTop: 8 }}>{t('Story and acceptance criteria')}</span>
         <TextboxMultiline value={text} onValueInput={setDraftBody} rows={9} grow spellCheck />
         <dl class={styles.draft}>
           {lines.map(([k, v]) => (
@@ -551,12 +595,13 @@ function Plugin() {
                 emit<PublishHandler>('PUBLISH', id, title, text)
               }}
             >
-              Create the issue
+              {t('Create the issue')}
             </Button>
           </div>
         ) : (
           <p class={styles.help}>
-            Changes to {repoName} are off. Allow them in <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button> to publish from here.
+            {t('Changes to {repo} are off. Allow them in', { repo: repoName })} <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button>{' '}
+            {t('to publish from here.')}
           </p>
         )}
       </div>
@@ -569,10 +614,14 @@ function Plugin() {
     if (!total) {
       return (
         <div class={styles.empty}>
-          <p><b>No story map on this page</b></p>
-          <p>Start one from a template, laid out like Figma's story map: a row for the persona, the activities, the tasks and two releases. Or open the page that holds your map; check Reading if it uses other colours or rows.</p>
+          <p><b>{t('No story map on this page')}</b></p>
+          <p>
+            {t(
+              "Start one from a template, laid out like Figma's story map: a row for the persona, the activities, the tasks and two releases. Or open the page that holds your map; check Reading if it uses other colours or rows.",
+            )}
+          </p>
           <div class={styles.actions} style={{ justifyContent: 'center' }}>
-            <Button onClick={() => emit<AddTemplateHandler>('ADD_TEMPLATE')}>Add a story map template</Button>
+            <Button onClick={() => emit<AddTemplateHandler>('ADD_TEMPLATE')}>{t('Add a story map template')}</Button>
           </div>
         </div>
       )
@@ -585,39 +634,37 @@ function Plugin() {
         {!board.guide.hidden && !selected ? <Guide board={board} now={now} goTo={setTab} /> : null}
         <div class={styles.overview}>
           <div class={styles.overviewLine}>
-            <span>
-              {count(b.stats.epics, 'epic', 'epics')} · {count(b.stats.features, 'feature', 'features')} · {count(b.stats.tasks, 'task', 'tasks')}
-            </span>
+            <span>{counts(b.stats).join(' · ')}</span>
             {board.issues.length ? (
-              <span class={styles.inlineToggle} title="Show each linked sticky's issue, sprint and status on the board">
+              <span class={styles.inlineToggle} title={t("Show each linked sticky's issue, sprint and status on the board")}>
                 <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>
-                  Labels
+                  {t('Labels', undefined, 'board')}
                 </Toggle>
               </span>
             ) : null}
           </div>
           {board.settings.issuesLoaded !== null ? (
-            <div class={styles.progress} title={`${progress.linked} of ${progress.total} stickies linked to an issue`}>
+            <div class={styles.progress} title={t('{n} of {total} stickies linked to an issue', { n: progress.linked, total: progress.total })}>
               <div class={styles.progressBar} style={{ width: `${progress.total ? Math.round((progress.linked / progress.total) * 100) : 0}%` }} />
-              <span class={styles.progressText}>{progress.linked} of {progress.total} linked to GitHub</span>
+              <span class={styles.progressText}>{t('{n} of {total} linked to GitHub', { n: progress.linked, total: progress.total })}</span>
             </div>
           ) : null}
           {b.milestones.length || board.sprints.length ? (
             <div class={styles.filters}>
               {b.milestones.length ? (
                 <Dropdown
-                  value={filter}
-                  options={releases.map((r) => ({ value: r, text: r === 'all' ? 'All releases' : r === 'none' ? 'No release' : r }))}
+                  value={releases.includes(filter) ? filter : 'all'}
+                  options={releases.map((r) => ({ value: r, text: r === 'all' ? t('All releases') : r === 'none' ? t('No release') : r }))}
                   onValueChange={setFilter}
                 />
               ) : null}
               {board.sprints.length ? (
                 <Dropdown
-                  value={sprintFilter}
+                  value={sprintFilter === 'none' || board.sprints.some((x) => x.title === sprintFilter) ? sprintFilter : 'all'}
                   options={[
-                    { value: 'all', text: 'All sprints' },
-                    ...board.sprints.map((x) => ({ value: x.title, text: `${x.title} · ends ${x.end.slice(5)}` })),
-                    { value: 'none', text: 'Not in a sprint' },
+                    { value: 'all', text: t('All sprints') },
+                    ...board.sprints.map((x) => ({ value: x.title, text: t('{sprint} · ends {date}', { sprint: x.title, date: x.end.slice(5) }) })),
+                    { value: 'none', text: t('Not in a sprint') },
                   ]}
                   onValueChange={setSprintFilter}
                 />
@@ -626,13 +673,22 @@ function Plugin() {
           ) : null}
           <div class={styles.kinds}>
             {(['epic', 'feature', 'task'] as Array<Kind>).map((k) => (
-              <span key={k}><span class={`${styles.dot} ${styles[k]}`} /> {KIND_LABEL[k]}</span>
+              <span key={k}><span class={`${styles.dot} ${styles[k]}`} /> {kindLabel(k)}</span>
             ))}
-            {b.notes.length ? <span><span class={`${styles.dot} ${styles.note}`} /> Note</span> : null}
+            {b.notes.length ? <span><span class={`${styles.dot} ${styles.note}`} /> {kindLabel('note')}</span> : null}
           </div>
         </div>
-        {b.unmapped.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.unmapped.length} colour(s) not read yet. Set them in <button class={styles.linkButton} onClick={() => setTab('Reading')}>Reading</button>.</div> : null}
-        {b.orphans.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.orphans.length} item(s) have no parent column. They are listed at the bottom.</div> : null}
+        {b.unmapped.length ? (
+          <div class={`${styles.notice} ${styles.warn}`}>
+            {plural(b.unmapped.length, '{n} colour not read yet. Set it in', '{n} colours not read yet. Set them in')}{' '}
+            <button class={styles.linkButton} onClick={() => setTab('Reading')}>{t('Reading')}</button>.
+          </div>
+        ) : null}
+        {b.orphans.length ? (
+          <div class={`${styles.notice} ${styles.warn}`}>
+            {plural(b.orphans.length, '{n} item has no parent column. It is listed at the bottom.', '{n} items have no parent column. They are listed at the bottom.')}
+          </div>
+        ) : null}
         <ul class={styles.tree}>
           {b.epics.map((e) => {
             const inner = [...e.features.map(featureTree).filter(Boolean), ...e.tasks.filter(keep).map(taskTree)]
@@ -648,13 +704,13 @@ function Plugin() {
         </ul>
         {b.notes.length ? (
           <Fragment>
-            <p class={styles.sectionTitle}>Notes, not issues</p>
+            <p class={styles.sectionTitle}>{t('Notes, not issues')}</p>
             <ul class={styles.tree}>{b.notes.map((n) => <li key={n.id}>{row(n, 'note')}</li>)}</ul>
           </Fragment>
         ) : null}
         {b.orphans.length ? (
           <Fragment>
-            <p class={styles.sectionTitle}>Without a parent</p>
+            <p class={styles.sectionTitle}>{t('Without a parent')}</p>
             <ul class={styles.tree}>{b.orphans.map((o) => <li key={o.id}>{row(o, (o.kind as Kind) || 'task')}</li>)}</ul>
           </Fragment>
         ) : null}
@@ -672,9 +728,9 @@ function Plugin() {
       emit<ResolveHandler>('RESOLVE', x.id, key, side)
     }
     const mapLabel: Record<string, string> = {
-      title: 'Rename the issue',
-      milestone: x.target ? `Set milestone ${x.target}` : 'Remove the milestone',
-      parent: `Move under #${x.target}`,
+      title: t('Rename the issue'),
+      milestone: x.target ? t('Set milestone {m}', { m: String(x.target) }) : t('Remove the milestone'),
+      parent: t('Move under #{n}', { n: String(x.target) }),
     }
     const canFix = x.kind in mapLabel
     const action = (x.kind === 'parent' ? 'parent' : x.kind === 'milestone' ? 'milestone' : 'title') as Action
@@ -684,20 +740,20 @@ function Plugin() {
           askFor(action)
         ) : canFix ? (
           board.settings.writeAllowed ? (
-            <Button onClick={() => go('map')} title="The map is right: change GitHub">
+            <Button onClick={() => go('map')} title={t('The map is right: change GitHub')}>
               {mapLabel[x.kind]}
             </Button>
           ) : (
-            <span class={styles.help}>To change GitHub from here, choose Can write in GitHub.</span>
+            <span class={styles.help}>{t('To change GitHub from here, choose Can write in GitHub.')}</span>
           )
         ) : null}
         {x.kind === 'title' && may('title') ? (
-          <Button secondary onClick={() => go('github')} title="GitHub is right: change the sticky">
-            Rename the sticky
+          <Button secondary onClick={() => go('github')} title={t('GitHub is right: change the sticky')}>
+            {t('Rename the sticky')}
           </Button>
         ) : null}
-        <Button secondary onClick={() => go('keep')} title="Both are right: stop showing this difference">
-          Keep both
+        <Button secondary onClick={() => go('keep')} title={t('Both are right: stop showing this difference')}>
+          {t('Keep both')}
         </Button>
       </div>
     )
@@ -720,7 +776,7 @@ function Plugin() {
       const like = lookalike(i)
       return (
         <div class={styles.row} key={i.id} onMouseEnter={() => focus(i.id, false)}>
-          <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
+          <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={kindLabel(i.kind)} />
           {s.writeAllowed && may('create') && publishable.includes(i) ? (
             <span class={styles.label}>
               <Checkbox value={ticked(i)} onValueChange={(v: boolean) => setPicked((p) => ({ ...p, [i.id]: v }))}>
@@ -731,7 +787,7 @@ function Plugin() {
             <button class={`${styles.rowLink} ${styles.label}`} onClick={() => open(i.id)}>{i.title}</button>
           )}
           {like ? (
-            <button class={`${styles.pill} ${styles.pillMaybe}`} title={`Looks like #${like.number} ${like.title}. Open the card to link it.`} onClick={() => open(i.id)}>
+            <button class={`${styles.pill} ${styles.pillMaybe}`} title={t('Looks like #{n} {title}. Open the card to link it.', { n: like.number, title: like.title })} onClick={() => open(i.id)}>
               #{like.number}?
             </button>
           ) : null}
@@ -741,7 +797,7 @@ function Plugin() {
     if (!s.writeAllowed || !may('create')) {
       return (
         <Fragment>
-          {s.writeAllowed ? <p>{askFor('create')}</p> : <p class={styles.help}>To create these as issues in one go, choose Can write in GitHub.</p>}
+          {s.writeAllowed ? <p>{askFor('create')}</p> : <p class={styles.help}>{t('To create these as issues in one go, choose Can write in GitHub.')}</p>}
           {items.map(row)}
         </Fragment>
       )
@@ -749,7 +805,9 @@ function Plugin() {
     return (
       <Fragment>
         <p class={styles.help}>
-          Tick the stickies to create as issues: they are created parents first, each with the repository's issue text. The ones marked #? look like an issue that exists: open their card to link them instead.
+          {t(
+            "Tick the stickies to create as issues: they are created parents first, each with the repository's issue text. The ones marked #? look like an issue that exists: open their card to link them instead.",
+          )}
         </p>
         <div class={styles.actions} style={{ marginBottom: 6 }}>
           <Button
@@ -760,12 +818,12 @@ function Plugin() {
               setPicked({})
             }}
           >
-            {chosen.length === 1 ? 'Create 1 issue' : `Create ${chosen.length} issues`}
+            {plural(chosen.length, 'Create {n} issue', 'Create {n} issues')}
           </Button>
-          <Button secondary onClick={() => setPicked(Object.fromEntries(publishable.map((i) => [i.id, !lookalike(i)])))} title="Ticks every sticky that looks like no existing issue">
-            Tick the new ones
+          <Button secondary onClick={() => setPicked(Object.fromEntries(publishable.map((i) => [i.id, !lookalike(i)])))} title={t('Ticks every sticky that looks like no existing issue')}>
+            {t('Tick the new ones')}
           </Button>
-          <Button secondary onClick={() => setPicked(Object.fromEntries(publishable.map((i) => [i.id, false])))}>Tick none</Button>
+          <Button secondary onClick={() => setPicked(Object.fromEntries(publishable.map((i) => [i.id, false])))}>{t('Tick none')}</Button>
         </div>
         {items.map(row)}
       </Fragment>
@@ -784,19 +842,21 @@ function Plugin() {
     if (!w) {
       return (
         <div class={styles.weekStart}>
-          <p class={styles.question}>What moved this week?</p>
-          <p class={styles.help}>Mark the start of the week, at the weekly for example: from then on, the issues that are created, closed or change status, sprint, size or title show here, for the whole team.</p>
-          <div class={styles.actions}><Button secondary onClick={start}>Start the week now</Button></div>
+          <p class={styles.question}>{t('What moved this week?')}</p>
+          <p class={styles.help}>
+            {t('Mark the start of the week, at the weekly for example: from then on, the issues that are created, closed or change status, sprint, size or title show here, for the whole team.')}
+          </p>
+          <div class={styles.actions}><Button secondary onClick={start}>{t('Start the week now')}</Button></div>
         </div>
       )
     }
-    const since = new Date(w.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    const since = new Date(w.at).toLocaleString(getLang(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     const stickyOf = (number: number) => Object.keys(board.matches).find((id) => issueOf(board, id) && issueOf(board, id)!.number === number)
     return (
       <Disclosure
         open={Boolean(openSections.week)}
         onClick={() => toggleSection('week')}
-        title={`Since ${since} · ${w.moved.length ? `${w.moved.length} ${w.moved.length === 1 ? 'issue moved' : 'issues moved'}` : 'nothing moved'}`}
+        title={`${t('Since {date}', { date: since })} · ${w.moved.length ? plural(w.moved.length, '{n} issue moved', '{n} issues moved') : t('nothing moved')}`}
       >
         {w.moved.map((m) => {
           const sticky = stickyOf(m.number)
@@ -804,8 +864,12 @@ function Plugin() {
           return (
             <div class={styles.moved} key={m.number}>
               <div class={styles.driftHead}>
-                <span class={`${styles.pill} ${m.kind === 'new' ? styles.pillNew : m.kind === 'changed' ? styles.pillMilestone : styles.pillMaybe}`}>{KIND_MOVED[m.kind]}</span>
-                <button class={`${styles.linkButton} ${styles.label}`} onClick={() => (sticky ? open(sticky) : url && emit<OpenHandler>('OPEN', url))} title={sticky ? 'Show its sticky' : 'Not on the map: open on GitHub'}>
+                <span class={`${styles.pill} ${m.kind === 'new' ? styles.pillNew : m.kind === 'changed' ? styles.pillMilestone : styles.pillMaybe}`}>{t(KIND_MOVED[m.kind])}</span>
+                <button
+                  class={`${styles.linkButton} ${styles.label}`}
+                  onClick={() => (sticky ? open(sticky) : url && emit<OpenHandler>('OPEN', url))}
+                  title={sticky ? t('Show its sticky') : t('Not on the map: open on GitHub')}
+                >
                   #{m.number} {m.title}
                 </button>
               </div>
@@ -819,7 +883,7 @@ function Plugin() {
           )
         })}
         <div class={styles.actions}>
-          <Button secondary onClick={start} title="Compare against this moment from now on">Start a new week</Button>
+          <Button secondary onClick={start} title={t('Compare against this moment from now on')}>{t('Start a new week')}</Button>
         </div>
       </Disclosure>
     )
@@ -832,9 +896,10 @@ function Plugin() {
     if (!d) {
       return (
         <div class={styles.empty}>
-          <p><b>Connect a repository first</b></p>
+          <p><b>{t('Connect a repository first')}</b></p>
           <p>
-            In <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button>, sign in and pick the repository of this map.
+            {t('In')} <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button>
+            {t(', sign in and pick the repository of this map.')}
           </p>
         </div>
       )
@@ -844,9 +909,15 @@ function Plugin() {
         {resolving && status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
         {week()}
         {d.drifts.length ? (
-          <p class={styles.lead}>{d.drifts.length === 1 ? 'One place' : `${d.drifts.length} places`} where the map and GitHub disagree. Pick which side is right; nothing changes until you do.</p>
+          <p class={styles.lead}>
+            {plural(
+              d.drifts.length,
+              'One place where the map and GitHub disagree. Pick which side is right; nothing changes until you do.',
+              '{n} places where the map and GitHub disagree. Pick which side is right; nothing changes until you do.',
+            )}
+          </p>
         ) : (
-          <div class={`${styles.notice} ${styles.ok}`}>The linked stickies and their issues agree.</div>
+          <div class={`${styles.notice} ${styles.ok}`}>{t('The linked stickies and their issues agree.')}</div>
         )}
         {d.drifts.map((x) => {
           const key = `${x.id}:${x.kind}:${x.number}`
@@ -854,12 +925,12 @@ function Plugin() {
           return (
             <div class={styles.drift} key={key}>
               <div class={styles.driftHead}>
-                <span class={`${styles.pill} ${styles.pillMaybe}`}>{DRIFT_LABEL[x.kind]}</span>
+                <span class={`${styles.pill} ${styles.pillMaybe}`}>{t(DRIFT_LABEL[x.kind])}</span>
                 <button class={`${styles.linkButton} ${styles.label}`} onClick={() => open(x.id)}>{x.title}</button>
                 <button class={styles.linkButton} onClick={() => x.url && emit<OpenHandler>('OPEN', x.url)}>#{x.number}</button>
               </div>
               <div class={styles.driftSides}>
-                <span class={styles.driftSide}>Map</span><span>{x.board}</span>
+                <span class={styles.driftSide}>{t('Map')}</span><span>{x.board}</span>
                 <span class={styles.driftSide}>GitHub</span><span>{x.github}</span>
               </div>
               {settle(x)}
@@ -871,25 +942,25 @@ function Plugin() {
                     emit<WhyHandler>('WHY', key, x.number, x.kind)
                   }}
                 >
-                  Why?
+                  {t('Why?')}
                 </Button>
               ) : w.loading ? (
-                <p class={styles.help}>Reading the history…</p>
+                <p class={styles.help}>{t('Reading the history…')}</p>
               ) : w.error ? (
                 <p class={styles.help}>{w.error}</p>
               ) : w.lines && w.lines.length ? (
                 <ul class={styles.history}>{w.lines.map((l) => <li key={l}>{l}</li>)}</ul>
               ) : (
-                <p class={styles.help}>No change recorded on GitHub: it has differed since the issue was written.</p>
+                <p class={styles.help}>{t('No change recorded on GitHub: it has differed since the issue was written.')}</p>
               )}
             </div>
           )
         })}
         {d.toConfirm.length ? (
-          <Disclosure open={Boolean(openSections.confirm)} onClick={() => toggleSection('confirm')} title={`Close titles to confirm · ${d.toConfirm.length}`}>
+          <Disclosure open={Boolean(openSections.confirm)} onClick={() => toggleSection('confirm')} title={`${t('Close titles to confirm')} · ${d.toConfirm.length}`}>
             {d.toConfirm.map((i) => (
               <div class={styles.row} key={i.id} onClick={() => open(i.id)} onMouseEnter={() => focus(i.id, false)}>
-                <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
+                <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={kindLabel(i.kind)} />
                 <span class={styles.label}>{i.title}</span>
                 <span class={`${styles.pill} ${styles.pillMaybe}`}>#{i.number}?</span>
               </div>
@@ -897,12 +968,12 @@ function Plugin() {
           </Disclosure>
         ) : null}
         {d.onlyOnBoard.length ? (
-          <Disclosure open={Boolean(openSections.board)} onClick={() => toggleSection('board')} title={`On the map only · ${d.onlyOnBoard.length}`}>
+          <Disclosure open={Boolean(openSections.board)} onClick={() => toggleSection('board')} title={`${t('On the map only')} · ${d.onlyOnBoard.length}`}>
             {batch(d.onlyOnBoard)}
           </Disclosure>
         ) : null}
         {d.onlyOnGitHub.length ? (
-          <Disclosure open={Boolean(openSections.github)} onClick={() => toggleSection('github')} title={`On GitHub only · ${d.onlyOnGitHub.length} open issues`}>
+          <Disclosure open={Boolean(openSections.github)} onClick={() => toggleSection('github')} title={`${t('On GitHub only')} · ${plural(d.onlyOnGitHub.length, '{n} open issue', '{n} open issues')}`}>
             {d.onlyOnGitHub.map((i) => (
               <div class={styles.row} key={i.number} onClick={() => i.url && emit<OpenHandler>('OPEN', i.url)}>
                 <span class={styles.label}>#{i.number} {i.title}</span>
@@ -917,21 +988,25 @@ function Plugin() {
 
   const legend = () => {
     const byRows = b.mode === 'rows'
-    const types = Object.entries(board.nodeTypes).sort((x, y) => y[1] - x[1]).map(([t, c]) => `${c} ${t.toLowerCase().replace(/_/g, ' ')}`).join(', ')
+    // Figma's node types, such as "12 sticky, 3 text"; the usual ones are translated.
+    const types = Object.entries(board.nodeTypes)
+      .sort((x, y) => y[1] - x[1])
+      .map(([type, c]) => `${c} ${t(type.toLowerCase().replace(/_/g, ' '), undefined, 'node')}`)
+      .join(', ')
     return (
       <Fragment>
         <div style={{ margin: '12px 0 8px' }}>
           <SegmentedControl
             value={board.settings.mode}
             onValueChange={(v: string) => emit<SetModeHandler>('SET_MODE', v as BoardPayload['settings']['mode'])}
-            options={[{ value: 'auto', children: 'Automatic' }, { value: 'rows', children: 'By rows' }, { value: 'colours', children: 'By colours' }]}
+            options={[{ value: 'auto', children: t('Automatic') }, { value: 'rows', children: t('By rows') }, { value: 'colours', children: t('By colours') }]}
           />
         </div>
         <p class={styles.help}>
           {byRows
-            ? "Read by rows, as in Figma's story map template: each labelled row gives the kind of the stickies in it. Release rows become milestones."
-            : 'Read by colours: each sticky colour gives one kind of item.'}
-          {board.settings.mode === 'auto' ? ' Chosen automatically.' : ''}
+            ? t("Read by rows, as in Figma's story map template: each labelled row gives the kind of the stickies in it. Release rows become milestones.")
+            : t('Read by colours: each sticky colour gives one kind of item.')}
+          {board.settings.mode === 'auto' ? ` ${t('Chosen automatically.')}` : ''}
         </p>
         {byRows
           ? b.rows.map((r) => (
@@ -939,23 +1014,27 @@ function Plugin() {
                 <span class={`${styles.swatch} ${styles.rowMark}`}>{r.kind === 'release' ? 'R' : r.name.slice(0, 1).toUpperCase()}</span>
                 <div>
                   <div>{r.name}</div>
-                  <div class={styles.samples}>{r.count} {r.count === 1 ? 'sticky' : 'stickies'}{r.kind === 'release' ? ', milestone' : ''}</div>
+                  <div class={styles.samples}>
+                    {plural(r.count, '{n} sticky', '{n} stickies')}
+                    {r.kind === 'release' ? t(', milestone') : ''}
+                  </div>
                 </div>
-                <Dropdown value={r.type} options={TYPE_OPTIONS} onValueChange={(v: string) => emit<SetRowTypeHandler>('SET_ROW_TYPE', r.name, v as ItemType)} />
+                <Dropdown value={r.type} options={typeOptions()} onValueChange={(v: string) => emit<SetRowTypeHandler>('SET_ROW_TYPE', r.name, v as ItemType)} />
               </div>
             ))
           : board.palette.map((c) => (
               <div class={styles.legendRow} key={c.hex}>
                 <span class={styles.swatch} style={{ background: c.hex }} />
                 <div>
-                  <div>{c.count} {c.hue} {c.count > 1 ? 'stickies' : 'sticky'}</div>
+                  <div>{plural(c.count, '{n} {hue} sticky', '{n} {hue} stickies', { hue: hueName(c.hue) })}</div>
                   <div class={styles.samples} title={c.samples.join(' · ')}>{c.samples.join(' · ')}</div>
                 </div>
-                <Dropdown value={board.legend[c.hex] || 'ignore'} options={TYPE_OPTIONS} onValueChange={(v: string) => emit<SetLegendHandler>('SET_LEGEND', c.hex, v as ItemType)} />
+                <Dropdown value={board.legend[c.hex] || 'ignore'} options={typeOptions()} onValueChange={(v: string) => emit<SetLegendHandler>('SET_LEGEND', c.hex, v as ItemType)} />
               </div>
             ))}
         <p class={styles.help}>
-          Read on this page: {types || 'nothing'}. {b.stats.ignored} stickies skipped (legend, labels, empty or ignored).
+          {t('Read on this page: {types}.', { types: types || t('nothing') })}{' '}
+          {plural(b.stats.ignored, '{n} sticky skipped (legend, labels, empty or ignored).', '{n} stickies skipped (legend, labels, empty or ignored).')}
         </p>
       </Fragment>
     )
@@ -993,22 +1072,22 @@ function Plugin() {
         {status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
 
         <div class={styles.setupStep}>
-          <span class={styles.stepTitle}>1. Your GitHub account</span>
+          <span class={styles.stepTitle}>{t('1. Your GitHub account')}</span>
           {auth.state === 'error' ? <div class={`${styles.notice} ${styles.error}`}>{auth.error}</div> : null}
           {signedIn ? (
             <div class={styles.stepRow}>
-              <span>Connected as <strong>@{s.login}</strong></span>
-              <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Sign out</Button>
+              <span>{t('Connected as')} <strong>@{s.login}</strong></span>
+              <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>{t('Sign out')}</Button>
             </div>
           ) : null}
           {signedIn ? (
             <p class={styles.help}>
-              The plugin can read and change issues in the repositories your account can reach; it only writes where you choose "Can write". Signing out forgets the token here; revoke it on{' '}
+              {t('The plugin can read and change issues in the repositories your account can reach; it only writes where you choose "Can write". Signing out forgets the token here; revoke it on')}{' '}
               <button class={styles.linkButton} onClick={() => emit<OpenHandler>('OPEN', 'https://github.com/settings/applications')}>GitHub</button>.
             </p>
           ) : auth.state === 'code' ? (
             <Fragment>
-              <p class={styles.help}>Enter this code on GitHub, then authorize Storymap to GitHub.</p>
+              <p class={styles.help}>{t('Enter this code on GitHub, then authorize Storymap to GitHub.')}</p>
               <div class={styles.userCode}>{auth.userCode}</div>
               <div class={styles.actions}>
                 <Button
@@ -1017,16 +1096,16 @@ function Plugin() {
                     if (auth.url) emit<OpenHandler>('OPEN', auth.url)
                   }}
                 >
-                  {codeCopied ? 'Code copied, opening GitHub' : 'Copy the code and open GitHub'}
+                  {codeCopied ? t('Code copied, opening GitHub') : t('Copy the code and open GitHub')}
                 </Button>
-                <Button secondary onClick={() => emit<CancelSignInHandler>('CANCEL_SIGN_IN')}>Cancel</Button>
+                <Button secondary onClick={() => emit<CancelSignInHandler>('CANCEL_SIGN_IN')}>{t('Cancel')}</Button>
               </div>
-              <p class={styles.help}>Waiting for GitHub…</p>
+              <p class={styles.help}>{t('Waiting for GitHub…')}</p>
             </Fragment>
           ) : s.hasToken ? (
             <div class={styles.stepRow}>
-              <span>Connected with a token</span>
-              <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Forget it</Button>
+              <span>{t('Connected with a token')}</span>
+              <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>{t('Forget it')}</Button>
             </div>
           ) : (
             <Fragment>
@@ -1038,12 +1117,12 @@ function Plugin() {
                     emit<SignInHandler>('SIGN_IN')
                   }}
                 >
-                  Connect with GitHub
+                  {t('Connect with GitHub')}
                 </Button>
               </div>
               {useToken ? (
                 <div class={styles.field}>
-                  <span class={styles.fieldLabel}>Or paste a token (classic: repo, project, read:org)</span>
+                  <span class={styles.fieldLabel}>{t('Or paste a token (classic: repo, project, read:org)')}</span>
                   <Textbox value={token} onValueInput={setToken} password placeholder="ghp_…" />
                   <div class={styles.actions}>
                     <Button
@@ -1054,13 +1133,14 @@ function Plugin() {
                         setToken('')
                       }}
                     >
-                      Use this token
+                      {t('Use this token')}
                     </Button>
                   </div>
                 </div>
               ) : (
                 <p class={styles.help}>
-                  Opens GitHub to approve, nothing to copy by hand. <button class={styles.linkButton} onClick={() => setUseToken(true)}>Use a token instead</button>
+                  {t('Opens GitHub to approve, nothing to copy by hand.')}{' '}
+                  <button class={styles.linkButton} onClick={() => setUseToken(true)}>{t('Use a token instead')}</button>
                 </p>
               )}
             </Fragment>
@@ -1069,23 +1149,23 @@ function Plugin() {
 
         {s.hasToken ? (
           <div class={styles.setupStep}>
-            <span class={styles.stepTitle}>2. Repository</span>
+            <span class={styles.stepTitle}>{t('2. Repository')}</span>
             {s.repo && !changingRepo ? (
               <div class={styles.stepRow}>
                 <strong>{s.repo}</strong>
-                <Button secondary onClick={() => setChangingRepo(true)}>Change</Button>
+                <Button secondary onClick={() => setChangingRepo(true)}>{t('Change')}</Button>
               </div>
             ) : (
               <Fragment>
-                <SearchTextbox value={repoSearch} onValueInput={setRepoSearch} placeholder={repos ? `Search ${repos.length} repositories` : 'Loading your repositories…'} />
+                <SearchTextbox value={repoSearch} onValueInput={setRepoSearch} placeholder={repos ? plural(repos.length, 'Search {n} repository', 'Search {n} repositories') : t('Loading your repositories…')} />
                 {shown.map((r) => (
                   <button key={r.name} class={styles.candidate} onClick={() => pickRepo(r.name)}>
                     {r.name}
-                    {r.private ? <span class={styles.candidateWhy}>Private</span> : null}
+                    {r.private ? <span class={styles.candidateWhy}>{t('Private')}</span> : null}
                   </button>
                 ))}
-                {typed ? <button class={styles.candidate} onClick={() => pickRepo(repoSearch.trim())}>Use {repoSearch.trim()}</button> : null}
-                {s.repo ? <Button secondary onClick={() => setChangingRepo(false)}>Keep {s.repo}</Button> : null}
+                {typed ? <button class={styles.candidate} onClick={() => pickRepo(repoSearch.trim())}>{t('Use {repo}', { repo: repoSearch.trim() })}</button> : null}
+                {s.repo ? <Button secondary onClick={() => setChangingRepo(false)}>{t('Keep {repo}', { repo: s.repo })}</Button> : null}
               </Fragment>
             )}
           </div>
@@ -1093,13 +1173,13 @@ function Plugin() {
 
         {s.hasToken && s.repo && !changingRepo ? (
           <div class={styles.setupStep}>
-            <span class={styles.stepTitle}>3. Project board, for sprints and status</span>
+            <span class={styles.stepTitle}>{t('3. Project board, for sprints and status')}</span>
             {projects === null ? (
-              <p class={styles.help}>Looking for the boards of {s.repo}…</p>
+              <p class={styles.help}>{t('Looking for the boards of {repo}…', { repo: s.repo })}</p>
             ) : (
               <Dropdown
-                value={s.project || 'none'}
-                options={[{ value: 'none', text: projects.length ? 'No board' : 'This repository has no board' }, ...projects.map((p) => ({ value: p.url, text: p.title }))]}
+                value={projects.some((p) => p.url === s.project) ? s.project : 'none'}
+                options={[{ value: 'none', text: projects.length ? t('No board') : t('This repository has no board') }, ...projects.map((p) => ({ value: p.url, text: p.title }))]}
                 onValueChange={(v: string) => emit<SelectProjectHandler>('SELECT_PROJECT', v === 'none' ? '' : v)}
               />
             )}
@@ -1118,36 +1198,44 @@ function Plugin() {
     const save = (change: { startLabel?: string; startStatus?: string; bodyTemplate?: string }) => emit<SetPublishingHandler>('SET_PUBLISHING', change)
     return (
       <div class={styles.publish}>
-        <span class={styles.stepTitle}>4. Your role</span>
+        <span class={styles.stepTitle}>{t('4. Your role')}</span>
         <SegmentedControl
           value={board.settings.role}
-          options={ROLE_OPTIONS.map((o) => ({ value: o.value, children: o.text }))}
+          options={roleOptions().map((o) => ({ value: o.value, children: o.text }))}
           onValueChange={(v: string) => emit<SetRoleHandler>('SET_ROLE', v as Role)}
         />
-        <p class={styles.help}>The plugin only offers the changes of your role, so nobody changes someone else's field by mistake. Who does what is under More settings.</p>
-        <span class={styles.stepTitle} style={{ marginTop: 12 }}>5. What the plugin may do in {repoName}</span>
+        <p class={styles.help}>{t("The plugin only offers the changes of your role, so nobody changes someone else's field by mistake. Who does what is under More settings.")}</p>
+        <span class={styles.stepTitle} style={{ marginTop: 12 }}>{t('5. What the plugin may do in {repo}', { repo: repoName })}</span>
         <SegmentedControl
           value={writeAllowed ? 'write' : 'read'}
-          options={[{ value: 'read', children: 'Read only' }, { value: 'write', children: 'Can write' }]}
+          options={[{ value: 'read', children: t('Read only') }, { value: 'write', children: t('Can write') }]}
           onValueChange={(v: string) => emit<SetWriteHandler>('SET_WRITE', v === 'write')}
         />
         <p class={styles.help}>
           {writeAllowed
-            ? 'The plugin can create issues, set sizes and settle differences, each after you click, and only the changes of your role.'
-            : 'The plugin only reads GitHub. This is the default for every repository.'}
+            ? t('The plugin can create issues, set sizes and settle differences, each after you click, and only the changes of your role.')
+            : t('The plugin only reads GitHub. This is the default for every repository.')}
         </p>
-        {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>Your account cannot write to {repoName}: creating issues will fail.</div> : null}
+        {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>{t('Your account cannot write to {repo}: creating issues will fail.', { repo: repoName })}</div> : null}
         <details class={styles.more}>
-          <summary>More settings</summary>
-          <span class={styles.fieldLabel}>Who does what, for the whole team</span>
+          <summary>{t('More settings')}</summary>
+          <div class={styles.field}>
+            <span class={styles.fieldLabel}>{t('Language')}</span>
+            <SegmentedControl
+              value={board.settings.langSetting}
+              options={LANG_OPTIONS.map((o) => ({ value: o.value, children: o.value === 'auto' ? t(o.text) : o.text }))}
+              onValueChange={(v: string) => emit<SetLangHandler>('SET_LANG', v as LangSetting)}
+            />
+          </div>
+          <span class={styles.fieldLabel}>{t('Who does what, for the whole team')}</span>
           {(Object.keys(ACTIONS) as Array<Action>).map((a) => (
             <div class={styles.ownerRow} key={a}>
-              <span>{ACTIONS[a]}</span>
-              <Dropdown value={board.settings.owners[a]} options={ROLE_OPTIONS} onValueChange={(v: string) => emit<SetOwnerHandler>('SET_OWNER', a, v as Role)} />
+              <span>{t(ACTIONS[a])}</span>
+              <Dropdown value={board.settings.owners[a]} options={roleOptions()} onValueChange={(v: string) => emit<SetOwnerHandler>('SET_OWNER', a, v as Role)} />
             </div>
           ))}
         <div class={styles.field}>
-          <span class={styles.fieldLabel}>Label of a new issue (empty for none)</span>
+          <span class={styles.fieldLabel}>{t('Label of a new issue (empty for none)')}</span>
           <Textbox
             value={startLabel === null ? publishing.startLabel : startLabel}
             onValueInput={setStartLabel}
@@ -1156,7 +1244,7 @@ function Plugin() {
           />
         </div>
         <div class={styles.field}>
-          <span class={styles.fieldLabel}>Status of a new issue on the project board (empty for none)</span>
+          <span class={styles.fieldLabel}>{t("Status of a new issue on the project board (empty: the board's first status)")}</span>
           <Textbox
             value={startStatus === null ? publishing.startStatus : startStatus}
             onValueInput={setStartStatus}
@@ -1165,16 +1253,16 @@ function Plugin() {
           />
         </div>
         <div class={styles.field}>
-          <span class={styles.fieldLabel}>Text of a new issue. {'{title}'}, {'{parent}'}, {'{release}'} and {'{steps}'} are filled in.</span>
+          <span class={styles.fieldLabel}>{t('Text of a new issue. {title}, {parent}, {release} and {steps} are filled in.')}</span>
           <TextboxMultiline
-            value={bodyTemplate === null ? publishing.bodyTemplate || DEFAULT_BODY : bodyTemplate}
+            value={bodyTemplate === null ? publishing.bodyTemplate || defaultBody() : bodyTemplate}
             onValueInput={setBodyTemplate}
-            onBlur={() => bodyTemplate !== null && save({ bodyTemplate: bodyTemplate.trim() === DEFAULT_BODY ? '' : bodyTemplate })}
+            onBlur={() => bodyTemplate !== null && save({ bodyTemplate: bodyTemplate.trim() === defaultBody() ? '' : bodyTemplate })}
             rows={8}
             grow
           />
           {publishing.bodyTemplate ? (
-            <button class={styles.linkButton} onClick={() => { setBodyTemplate(null); save({ bodyTemplate: '' }) }}>Back to the default text</button>
+            <button class={styles.linkButton} onClick={() => { setBodyTemplate(null); save({ bodyTemplate: '' }) }}>{t('Back to the default text')}</button>
           ) : null}
         </div>
         </details>
@@ -1190,30 +1278,35 @@ function Plugin() {
         <div class={styles.headerText}>
           <div class={styles.headerRepo}>
             {board.settings.repo ? (
-              <button class={styles.headerLink} onClick={() => setTab('GitHub')} title="Change the repository">
+              <button class={styles.headerLink} onClick={() => setTab('GitHub')} title={t('Change the repository')}>
                 {board.settings.repo}
               </button>
             ) : (
-              <button class={styles.headerLink} onClick={() => setTab('GitHub')}>Connect GitHub</button>
+              <button class={styles.headerLink} onClick={() => setTab('GitHub')}>{t('Connect GitHub')}</button>
             )}
           </div>
           <div class={styles.scope}>
-            {/^page\b/i.test(board.page) ? board.page : `Page ${board.page}`}
-            {board.settings.issuesLoaded !== null ? ` · ${board.settings.issuesLoaded} issues` : ''}
-            {board.readAt ? ` · updated ${ago(board.readAt, now)}` : ''}
+            {/^page\b/i.test(board.page) ? board.page : t('Page {name}', { name: board.page })}
+            {board.settings.issuesLoaded !== null ? ` · ${plural(board.settings.issuesLoaded, '{n} issue', '{n} issues')}` : ''}
+            {board.readAt ? ` · ${t('updated {ago}', { ago: ago(board.readAt, now) })}` : ''}
           </div>
         </div>
-        {board.guide.hidden ? <Button secondary onClick={() => { emit<SetGuideHandler>('SET_GUIDE', { hidden: false }); setTab('Map') }}>Guide</Button> : null}
-        <IconButton onClick={() => emit<RefreshHandler>('REFRESH')} title="Read the board and GitHub again">
+        {board.guide.hidden ? <Button secondary onClick={() => { emit<SetGuideHandler>('SET_GUIDE', { hidden: false }); setTab('Map') }}>{t('Guide')}</Button> : null}
+        <IconButton onClick={() => emit<RefreshHandler>('REFRESH')} title={t('Read the board and GitHub again')}>
           <IconRefresh16 />
         </IconButton>
       </div>
-      <Tabs value={tab} onValueChange={setTab} options={TAB_NAMES.map((value) => ({ value, children: null }))} />
+      {/* Tabs show their value, so the value is the translated name; the state keeps the English one. */}
+      <Tabs
+        value={t(tab)}
+        onValueChange={(v: string) => setTab(TAB_NAMES.find((name) => t(name) === v) || 'Map')}
+        options={TAB_NAMES.map((name) => ({ value: t(name), children: null }))}
+      />
       <div class={styles.main}>{tabContent[tab]()}</div>
       <div class={styles.footer}>
-        <button class={styles.mode} onClick={() => setTab('GitHub')} title="What the plugin may do on GitHub">
+        <button class={styles.mode} onClick={() => setTab('GitHub')} title={t('What the plugin may do on GitHub')}>
           {board.settings.writeAllowed ? <IconPublish16 /> : <IconLockLocked16 />}
-          {board.settings.writeAllowed ? 'Can write' : 'Read only'}
+          {board.settings.writeAllowed ? t('Can write') : t('Read only')}
         </button>
         <Button
           secondary
@@ -1224,11 +1317,11 @@ function Plugin() {
             area.select()
             const ok = document.execCommand('copy')
             area.remove()
-            setCopied(ok ? 'Copied' : 'Copy failed')
+            setCopied(ok ? t('Copied') : t('Copy failed'))
             setTimeout(() => setCopied(''), 1500)
           }}
         >
-          {copied || 'Copy Markdown'}
+          {copied || t('Copy Markdown')}
         </Button>
       </div>
     </div>

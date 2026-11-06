@@ -2,6 +2,8 @@
 
 Two parts: getting the plugin running for your team, then what the person who maintains it needs to know.
 
+[Version française](fr/installation.md)
+
 ## For a team
 
 ### What you need
@@ -31,6 +33,8 @@ A development plugin only shows for the person who imported it. Once the plugin 
 
 Open the page that holds your story map, then **Plugins › Development › Storymap to GitHub**. The quickest way: press `Cmd /`, type `Storymap`, press Enter.
 
+The plugin speaks the language of your system, English or French. To change it: **GitHub** tab, **More settings**, **Language**.
+
 On an empty page, the plugin offers **Add a story map template**: the rows of Figma's story map template (User Persona, Activities, Tasks, Release 1, Release 2), each with an example sticky.
 
 ![The starting template, read by the plugin](images/start-template.jpg)
@@ -55,7 +59,7 @@ In the **GitHub** tab:
 
 | What | Where | Who sees it |
 |---|---|---|
-| Your GitHub token, your role | Figma's storage on your computer | You only |
+| Your GitHub token, your role, your language | Figma's storage on your computer | You only |
 | The repository and board of a file | Figma's storage on your computer, per file | You only |
 | Links between stickies and issues, differences kept on purpose, the start of the week, who does what | Inside the FigJam file | Everyone on the board |
 

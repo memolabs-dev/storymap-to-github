@@ -1,6 +1,7 @@
 // Storymap to GitHub: the board reading logic, with no Figma API in it, so
 // it runs the same in the plugin and in node:test (see test/). Types are in
-// core.d.ts.
+// core.d.ts. Texts shown to people go through t() (see i18n.js).
+import { getLang, t } from './i18n.js';
 
 const TYPES = ['epic', 'feature', 'step', 'task', 'note', 'ignore'];
 
@@ -182,9 +183,9 @@ function releaseOf(item, releases) {
 // every sticky in them, whatever its colour.
 const ROW_KINDS = [
   { kind: 'persona', re: /^(user\s*)?personas?$/i },
-  { kind: 'activities', re: /^(user\s*)?(activit(y|ies)|backbone|epics?|themes?|goals?)$/i },
-  { kind: 'steps', re: /^steps?$/i },
-  { kind: 'tasks', re: /^(user\s*)?(tasks?|features?|walking\s*skeleton|narrative\s*flow)$/i },
+  { kind: 'activities', re: /^(user\s*)?(activit(y|ies|[ée]s?)|backbone|epics?|[ée]pop[ée]es?|themes?|goals?)$/i },
+  { kind: 'steps', re: /^([ée]tapes?|steps?)$/i },
+  { kind: 'tasks', re: /^(user\s*)?(tasks?|t[aâ]ches?|features?|fonctionnalit[ée]s?|walking\s*skeleton|narrative\s*flow)$/i },
 ];
 const DEFAULT_ROW_TYPES = { persona: 'note', activities: 'epic', steps: 'step', tasks: 'feature', release: 'task' };
 
@@ -478,7 +479,9 @@ function sameRelease(a, b) {
 // issues: [{ number, title, html_url, state, state_reason, milestone, parent }]
 // Returns { drifts: [{ id, title, kind, number, url, board, github }], onlyOnGitHub, onlyOnBoard, toConfirm }
 // What identifies one difference: when either side changes, it is a new one.
-const driftKey = (d) => `${d.kind}|${d.number}|${d.board}|${d.github}`;
+// The key is made from the English texts, so a difference kept on purpose
+// stays kept whatever language the plugin shows.
+const driftKey = (d) => d.key || `${d.kind}|${d.number}|${d.board}|${d.github}`;
 
 // kept: { [stickyId]: [driftKey] } differences the team keeps on purpose.
 // Each difference carries `target`, what the map wants: the sticky's title,
@@ -501,6 +504,11 @@ function findDrift(backlog, issues, matches, kept = {}) {
   const toConfirm = [];
   const used = new Set();
 
+  // en: the texts in English, for the key; shown: the same, translated.
+  const add = (base, kind, en, shown, extra = {}) => {
+    const d = { ...base, kind, board: en.board, github: en.github, ...extra };
+    drifts.push({ ...d, key: driftKey(d), board: shown.board, github: shown.github });
+  };
   const check = (item, kind, ancestors) => {
     const issue = linked(item);
     const m = matches[item.id];
@@ -512,28 +520,42 @@ function findDrift(backlog, issues, matches, kept = {}) {
     used.add(issue.number);
     const base = { id: item.id, title: item.title, number: issue.number, url: issue.html_url };
     if (issue.state === 'closed' && (issue.state_reason === 'not_planned' || issue.state_reason === 'duplicate')) {
-      drifts.push({ ...base, kind: 'dropped', board: 'Still on the map', github: issue.state_reason === 'duplicate' ? 'Closed as duplicate' : 'Closed as not planned' });
+      const github = issue.state_reason === 'duplicate' ? 'Closed as duplicate' : 'Closed as not planned';
+      add(base, 'dropped', { board: 'Still on the map', github }, { board: t('Still on the map'), github: t(github) });
     }
-    if (normalize(item.title) !== normalize(issue.title)) drifts.push({ ...base, kind: 'title', board: item.title, github: issue.title, target: item.title });
+    if (normalize(item.title) !== normalize(issue.title)) {
+      const sides = { board: item.title, github: issue.title };
+      add(base, 'title', sides, sides, { target: item.title });
+    }
     // Planned too late: the sprint ends after the due date of the release
     // the map puts the task in.
     const due = kind === 'task' && item.release ? dueOf(item.release) : null;
     if (due && issue.sprint && issue.sprint.end > due.date) {
-      drifts.push({ ...base, kind: 'schedule', board: `${item.release}, due ${due.date}`, github: `${issue.sprint.title}, ends ${issue.sprint.end}` });
+      const v = { release: item.release, date: due.date, sprint: issue.sprint.title, end: issue.sprint.end };
+      add(
+        base,
+        'schedule',
+        { board: `${item.release}, due ${due.date}`, github: `${issue.sprint.title}, ends ${issue.sprint.end}` },
+        { board: t('{release}, due {date}', v), github: t('{sprint}, ends {end}', v) },
+      );
     }
     if (kind === 'task' && !sameRelease(item.release, issue.milestone)) {
-      drifts.push({ ...base, kind: 'milestone', board: item.release || 'No release row', github: issue.milestone || 'No milestone', target: item.release || null });
+      const en = { board: item.release || 'No release row', github: issue.milestone || 'No milestone' };
+      add(base, 'milestone', en, { board: item.release || t('No release row'), github: issue.milestone || t('No milestone') }, { target: item.release || null });
     }
     const expected = ancestors.map(linked).filter(Boolean);
     if (expected.length && !expected.some((p) => p.number === issue.parent)) {
       const parent = issue.parent ? byNumber.get(issue.parent) : null;
-      drifts.push({
-        ...base,
-        kind: 'parent',
-        board: `Under ${expected.map((p) => `#${p.number}`).join(' or ')}`,
-        github: parent ? `Under #${parent.number} ${parent.title}` : issue.parent ? `Under #${issue.parent}` : 'No parent issue',
-        target: expected[0].number,
-      });
+      const numbers = expected.map((p) => `#${p.number}`);
+      const github = (say) =>
+        parent ? say('Under #{n} {title}', { n: parent.number, title: parent.title }) : issue.parent ? say('Under #{n}', { n: issue.parent }) : say('No parent issue');
+      add(
+        base,
+        'parent',
+        { board: `Under ${numbers.join(' or ')}`, github: github(fill) },
+        { board: t('Under {numbers}', { numbers: numbers.join(t(' or ')) }), github: github(t) },
+        { target: expected[0].number },
+      );
     }
   };
 
@@ -565,6 +587,9 @@ function findDrift(backlog, issues, matches, kept = {}) {
   return { drifts: open, onlyOnGitHub, onlyOnBoard, toConfirm };
 }
 
+// Fills {placeholders} without translating, for the English key of a drift.
+const fill = (s, vars = {}) => s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+
 // The "why" of a drift, read from the issue's history on GitHub.
 // events: the raw list from GET /repos/{owner}/{repo}/issues/{n}/events
 function explainEvents(events, kind) {
@@ -579,15 +604,16 @@ function explainEvents(events, kind) {
   return events
     .filter((e) => wanted.includes(e.event))
     .map((e) => {
-      const who = e.actor ? `@${e.actor.login}` : 'someone';
-      const when = day(e.created_at);
-      if (e.event === 'renamed') return `${when}, ${who} renamed it from "${e.rename.from}" to "${e.rename.to}"`;
-      if (e.event === 'milestoned') return `${when}, ${who} set the milestone to ${e.milestone.title}`;
-      if (e.event === 'demilestoned') return `${when}, ${who} removed the milestone ${e.milestone.title}`;
-      if (e.event === 'parent_issue_added') return `${when}, ${who} set its parent issue`;
-      if (e.event === 'parent_issue_removed') return `${when}, ${who} removed its parent issue`;
-      if (e.event === 'closed') return `${when}, ${who} closed it${e.commit_id ? ` with commit ${e.commit_id.slice(0, 7)}` : ''}`;
-      return `${when}, ${who} reopened it`;
+      const v = { when: day(e.created_at), who: e.actor ? `@${e.actor.login}` : t('someone') };
+      if (e.event === 'renamed') return t('{when}, {who} renamed it from "{from}" to "{to}"', { ...v, from: e.rename.from, to: e.rename.to });
+      if (e.event === 'milestoned') return t('{when}, {who} set the milestone to {milestone}', { ...v, milestone: e.milestone.title });
+      if (e.event === 'demilestoned') return t('{when}, {who} removed the milestone {milestone}', { ...v, milestone: e.milestone.title });
+      if (e.event === 'parent_issue_added') return t('{when}, {who} set its parent issue', v);
+      if (e.event === 'parent_issue_removed') return t('{when}, {who} removed its parent issue', v);
+      if (e.event === 'closed') {
+        return e.commit_id ? t('{when}, {who} closed it with commit {commit}', { ...v, commit: e.commit_id.slice(0, 7) }) : t('{when}, {who} closed it', v);
+      }
+      return t('{when}, {who} reopened it', v);
     });
 }
 
@@ -638,7 +664,7 @@ const sprintOf = (v) => ({ title: v.title, start: v.startDate, end: addDays(v.st
 
 // pages: the `projectV2` object of each page returned by projectQuery.
 // Returns { id, title, sprints: [{ title, start, end }], items: { 'owner/repo#12': { sprint, status, size } },
-//   sizeField: { id, name, options: [{ id, name }] } | null, itemIds: { 'owner/repo#12': cardId } }
+//   sizeField: { id, name, options: [{ id, name }] } | null, statusOptions: [name], itemIds: { 'owner/repo#12': cardId } }
 function readProject(pages) {
   const sprints = [];
   for (const field of pages[0].fields.nodes) {
@@ -648,6 +674,10 @@ function readProject(pages) {
   sprints.sort((a, b) => (a.start < b.start ? -1 : 1));
   const size = pages[0].fields.nodes.find((f) => f && f.options && SIZE_FIELD.test(f.name));
   const sizeField = size ? { id: size.id, name: size.name, options: size.options.map((o) => ({ id: o.id, name: o.name })) } : null;
+  // The Status field's options, in the board's order: a new issue starts in
+  // the first one unless the team names another.
+  const status = pages[0].fields.nodes.find((f) => f && f.options && /^status$/i.test(f.name));
+  const statusOptions = status ? status.options.map((o) => o.name) : [];
   const items = {};
   const itemIds = {};
   for (const page of pages) {
@@ -665,7 +695,7 @@ function readProject(pages) {
       items[`${issue.repository.nameWithOwner}#${issue.number}`.toLowerCase()] = entry;
     }
   }
-  return { id: pages[0].id || null, title: pages[0].title, sprints, items, sizeField, itemIds };
+  return { id: pages[0].id || null, title: pages[0].title, sprints, items, sizeField, statusOptions, itemIds };
 }
 
 // A Markdown draft of the backlog, to paste into an issue or a note.
@@ -675,23 +705,23 @@ function toMarkdown(backlog, matches = {}) {
     return m && m.number ? ` (#${m.number}${m.status === 'maybe' ? '?' : ''})` : '';
   };
   const lines = [];
-  const task = (t, depth = 1) => {
-    lines.push(`${'  '.repeat(depth)}- [ ] ${depth > 1 ? 'Sub-task' : 'Task'}: ${t.title}${t.release ? ` · ${t.release}` : ''}${ref(t)}`);
-    for (const s of t.subtasks || []) task(s, depth + 1);
+  const task = (item, depth = 1) => {
+    lines.push(`${'  '.repeat(depth)}- [ ] ${t(depth > 1 ? 'Sub-task: {title}' : 'Task: {title}', { title: item.title })}${item.release ? ` · ${item.release}` : ''}${ref(item)}`);
+    for (const s of item.subtasks || []) task(s, depth + 1);
   };
   const feature = (f, indent) => {
-    lines.push(`${indent}- Feature: ${f.title}${ref(f)}`);
-    for (const s of f.steps) lines.push(`${indent}  - Step: ${s.title}`);
-    f.tasks.forEach((t) => task(t));
+    lines.push(`${indent}- ${t('Feature: {title}', { title: f.title })}${ref(f)}`);
+    for (const s of f.steps) lines.push(`${indent}  - ${t('Step: {title}', { title: s.title })}`);
+    f.tasks.forEach((x) => task(x));
   };
   for (const epic of backlog.epics) {
-    lines.push(`## Epic: ${epic.title}${ref(epic)}`, '');
+    lines.push(`## ${t('Epic: {title}', { title: epic.title })}${ref(epic)}`, '');
     for (const f of epic.features) feature(f, '');
-    epic.tasks.forEach((t) => task(t));
+    epic.tasks.forEach((x) => task(x));
     lines.push('');
   }
   for (const f of backlog.looseFeatures) feature(f, '');
-  if (backlog.milestones.length) lines.push('', `Milestones: ${backlog.milestones.join(', ')}`);
+  if (backlog.milestones.length) lines.push('', t('Milestones: {list}', { list: backlog.milestones.join(', ') }));
   return lines.join('\n').trim() + '\n';
 }
 
@@ -716,7 +746,7 @@ function suggestIssues(title, kind, issues, count = 3) {
 // "#19 · Sprint 1 · Ready", or "#19 · Closed".
 function labelText(issue) {
   const parts = [`#${issue.number}`];
-  if (issue.state === 'closed') parts.push('Closed');
+  if (issue.state === 'closed') parts.push(t('Closed'));
   else {
     if (issue.sprint) parts.push(typeof issue.sprint === 'string' ? issue.sprint : issue.sprint.title);
     if (issue.status) parts.push(issue.status);
@@ -750,20 +780,39 @@ const TYPE_NAMES = { epic: 'Epic', feature: 'Feature', task: 'Task' };
 // The text a new issue starts with: a user story to complete, then where the
 // sticky sits on the map. Each team can set its own, per repository.
 // Placeholders: {title}, {parent}, {release}, {steps} (a checklist).
-const DEFAULT_BODY = [
-  '**As a** …',
-  '**I want** {title}',
-  '**So that** …',
-  '',
-  '### Acceptance criteria',
-  '- [ ] …',
-  '{steps}',
-  '',
-  '---',
-  'From the story map in FigJam.',
-  'Part of: {parent}',
-  'Release on the map: {release}',
-].join('\n');
+const DEFAULT_BODY = {
+  en: [
+    '**As a** …',
+    '**I want** {title}',
+    '**So that** …',
+    '',
+    '### Acceptance criteria',
+    '- [ ] …',
+    '{steps}',
+    '',
+    '---',
+    'From the story map in FigJam.',
+    'Part of: {parent}',
+    'Release on the map: {release}',
+  ].join('\n'),
+  fr: [
+    '**En tant que** …',
+    '**Je veux** {title}',
+    '**Afin de** …',
+    '',
+    "### Critères d'acceptation",
+    '- [ ] …',
+    '{steps}',
+    '',
+    '---',
+    'Depuis la story map dans FigJam.',
+    'Fait partie de\u00a0: {parent}',
+    'Release sur la carte\u00a0: {release}',
+  ].join('\n'),
+};
+
+// The default text, in the language the plugin shows.
+const defaultBody = () => DEFAULT_BODY[getLang()] || DEFAULT_BODY.en;
 
 // Fills the placeholders; a line that a placeholder left with nothing after
 // its label ("Release on the map: ") is dropped, and so is an empty {steps}.
@@ -800,17 +849,17 @@ function draftIssue(id, backlog, matches, repo, publishing) {
   if (up) {
     const pm = matches[up.item.id];
     parent = { id: up.item.id, title: up.item.title, number: isIssue(pm) ? pm.number : null };
-    if (parent.number === null) warnings.push(`"${up.item.title}" is not on GitHub yet: publish it first to make this issue its sub-issue.`);
+    if (parent.number === null) warnings.push(t('"{title}" is not on GitHub yet: publish it first to make this issue its sub-issue.', { title: up.item.title }));
   }
 
   let milestone = null;
   if (item.release) {
     const hit = (repo.milestones || []).find((ms) => sameRelease(item.release, ms.title));
     if (hit) milestone = { title: hit.title, number: hit.number };
-    else warnings.push(`No milestone on GitHub matches the release "${item.release}": the issue will have none.`);
+    else warnings.push(t('No milestone on GitHub matches the release "{release}": the issue will have none.', { release: item.release }));
   }
 
-  const body = fillTemplate(publishing.bodyTemplate || DEFAULT_BODY, {
+  const body = fillTemplate(publishing.bodyTemplate || defaultBody(), {
     title: item.title,
     parent: parent ? `${parent.title}${parent.number ? ` (#${parent.number})` : ''}` : '',
     release: item.release || '',
@@ -876,9 +925,9 @@ function changesSince(snapshot, issues) {
       continue;
     }
     const changes = WATCHED.filter(([key]) => (before[key] || null) !== (after[key] || null)).map(([key, field]) => ({
-      field,
-      from: before[key] || 'None',
-      to: after[key] || 'None',
+      field: t(field),
+      from: before[key] || t('None'),
+      to: after[key] || t('None'),
     }));
     const kind = before.state !== after.state ? (after.state === 'closed' ? 'closed' : 'reopened') : changes.length ? 'changed' : null;
     if (kind) moved.push({ number, title: after.title, kind, changes });
@@ -909,6 +958,7 @@ function canDo(role, action, owners = {}) {
 // example sticky in each. Positions are relative to the top left corner.
 const STICKY = 240;
 const GAP = 60;
+// The row labels are read back by ROW_KINDS and RELEASE_PATTERN, in both languages.
 const STARTER_ROWS = [
   { label: 'User Persona', text: 'Who uses the product, and what they need', fill: { r: 0.85, g: 0.78, b: 1 } },
   { label: 'Activities', text: 'An activity: something the persona does', fill: { r: 0.6, g: 0.8, b: 1 } },
@@ -921,8 +971,8 @@ function starterLayout() {
   const shapes = [];
   STARTER_ROWS.forEach((row, i) => {
     const y = i * (STICKY + GAP);
-    shapes.push({ kind: 'label', text: row.label, x: 0, y, w: 120, h: STICKY, fill: { r: 0.95, g: 0.95, b: 0.95 } });
-    shapes.push({ kind: 'sticky', text: row.text, x: 120 + GAP, y, w: STICKY, h: STICKY, fill: row.fill });
+    shapes.push({ kind: 'label', text: t(row.label), x: 0, y, w: 120, h: STICKY, fill: { r: 0.95, g: 0.95, b: 0.95 } });
+    shapes.push({ kind: 'sticky', text: t(row.text), x: 120 + GAP, y, w: STICKY, h: STICKY, fill: row.fill });
   });
   return shapes;
 }
@@ -932,7 +982,7 @@ export {
   DEFAULT_OWNERS,
   canDo,
   starterLayout,
-  DEFAULT_BODY,
+  defaultBody,
   snapshotOf,
   changesSince,
   publishOrder,

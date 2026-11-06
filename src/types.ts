@@ -2,6 +2,7 @@
 // typed style of Create Figma Plugin's `emit` and `on`.
 import { EventHandler } from '@create-figma-plugin/utilities'
 
+import type { Lang, LangSetting } from './i18n'
 import type { Action, Backlog, DriftReport, ItemType, Matches, Moved, Role, PaletteEntry, Publishing, ReadingMode, RepoMeta, Sprint } from './core'
 
 export interface IssueSummary {
@@ -48,6 +49,12 @@ export interface BoardPayload {
     publishing: Publishing
     // The sizes the project board offers (its Size field), or null.
     sizeOptions: Array<string> | null
+    // The statuses of the project board (its Status field), in order, or null.
+    statusOptions: Array<string> | null
+    // The language the plugin shows, and this person's choice ('auto'
+    // follows the system).
+    lang: Lang
+    langSetting: LangSetting
     // This person's role, and who makes which change on this repository.
     role: Role
     owners: Record<Action, Role>
@@ -137,9 +144,15 @@ export interface SelectProjectHandler extends EventHandler {
   name: 'SELECT_PROJECT'
   handler: (url: string) => void
 }
+// The window is ready; it sends the system's language (navigator.language),
+// which the plugin code cannot read itself.
 export interface ReadyHandler extends EventHandler {
   name: 'READY'
-  handler: () => void
+  handler: (navigatorLanguage: string) => void
+}
+export interface SetLangHandler extends EventHandler {
+  name: 'SET_LANG'
+  handler: (setting: LangSetting) => void
 }
 export interface RefreshHandler extends EventHandler {
   name: 'REFRESH'
