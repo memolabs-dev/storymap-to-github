@@ -252,7 +252,7 @@ async function addTemplate() {
     const y = center.y - height / 2 + shape.y
     if (shape.kind === 'label') {
       const label = figma.createShapeWithText()
-      label.shapeType = 'ROUNDED_RECTANGLE'
+      label.shapeType = 'SQUARE'
       label.resize(shape.w, shape.h)
       label.fills = [{ type: 'SOLID', color: shape.fill }]
       await figma.loadFontAsync(label.text.fontName as FontName)
