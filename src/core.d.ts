@@ -249,3 +249,7 @@ export declare function readProject(pages: Array<unknown>): ProjectBoard
 export declare function toMarkdown(backlog: Backlog, matches?: Matches): string
 export declare function suggestIssues(title: string, kind: string, issues: Array<Issue>, count?: number): Array<Suggestion>
 export declare function labelText(issue: Issue): string
+
+export type StatusTone = 'done' | 'active' | 'waiting' | 'closed'
+export declare function statusTone(status: string | null | undefined, state?: string): StatusTone
+export declare function matchesStatus(issue: { state?: string; status: string | null } | null, filter: string): boolean

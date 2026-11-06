@@ -38,11 +38,11 @@ L'arbre montre les épopées, les fonctionnalités avec leurs étapes, les tâch
 - `#19?` en orange : l'issue 19 a un titre proche. Ouvrez la fiche pour confirmer ou en choisir une autre.
 - `Nouveau` : pas encore sur GitHub.
 
-Une tâche affiche aussi sa release et, une fois liée, son **sprint**.
+Sous le titre d'une tâche : sa release et, une fois liée, son sprint. À droite, son **statut**, c'est-à-dire sa colonne sur le tableau de projet (`Todo`, `In Progress`, `Done`, ou les noms de votre tableau) : vert quand c'est fini, violet en cours ou en revue, gris en attente. Une issue fermée est marquée **Fermée**.
 
-Survoler une ligne sélectionne son post-it sur le tableau ; cliquer zoome dessus et ouvre sa fiche. Au-dessus de l'arbre : les totaux, la part de post-its liés, et des filtres par release et par sprint.
+Survoler une ligne sélectionne son post-it sur le tableau ; cliquer zoome dessus et ouvre sa fiche. Au-dessus de l'arbre : les totaux, la part de post-its liés, et des filtres par release, par sprint et par statut. Le filtre de statut propose aussi **Fermée** et **Pas encore sur GitHub**.
 
-**Étiquettes sur le tableau.** L'interrupteur **Étiquettes** pose une petite étiquette dans le coin de chaque post-it lié, par exemple `#6 · Sprint 1 · In Progress` : l'issue, son sprint et son **statut**, c'est-à-dire sa colonne sur le tableau de projet (`Todo`, `In Progress`, `Done`, ou les noms de votre tableau). Une issue fermée est marquée **Fermée**. L'étiquette suit son post-it quand il bouge et change quand l'issue change.
+**Étiquettes sur le tableau.** L'interrupteur **Étiquettes** pose une petite étiquette dans le coin de chaque post-it lié, avec son issue, son sprint et son statut, par exemple `#6 · Sprint 1 · In Progress`. L'étiquette suit son post-it quand il bouge et change quand l'issue change.
 
 ![Les étiquettes sur les post-its, à côté de l'arbre](../images/fr/board-labels.jpg)
 

@@ -38,11 +38,11 @@ The tree shows epics, features with their steps, tasks and sub-tasks. Each line 
 - `#19?` in orange: issue 19 has a close title. Open the card to confirm or pick another.
 - `New`: not on GitHub yet.
 
-A task also shows its release and, once linked, its **sprint**.
+Under a task's title: its release and, once linked, its sprint. On the right, its **status**, that is its column on the project board (`Todo`, `In Progress`, `Done`, or whatever names your board uses): green when done, purple while in progress or in review, grey while waiting. A closed issue is marked **Closed**.
 
-Hovering a line selects its sticky on the board; clicking it zooms there and opens its card. Above the tree: the counts, how many stickies are linked, and filters by release and by sprint.
+Hovering a line selects its sticky on the board; clicking it zooms there and opens its card. Above the tree: the counts, how many stickies are linked, and filters by release, by sprint and by status. The status filter also offers **Closed** and **Not on GitHub yet**.
 
-**Labels on the board.** The Labels switch puts a small label in the corner of each linked sticky, such as `#6 · Sprint 1 · In Progress`: the issue, its sprint and its **status**, that is its column on the project board (`Todo`, `In Progress`, `Done`, or whatever names your board uses). A closed issue is marked **Closed**. Labels follow their sticky when it moves and change when the issue changes.
+**Labels on the board.** The Labels switch puts a small label in the corner of each linked sticky with its issue, sprint and status, such as `#6 · Sprint 1 · In Progress`. Labels follow their sticky when it moves and change when the issue changes.
 
 ![Labels on the stickies, next to the tree](images/en/board-labels.jpg)
 

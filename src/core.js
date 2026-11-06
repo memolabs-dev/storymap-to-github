@@ -992,3 +992,23 @@ export {
   buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl,
   projectQuery, readProject, toMarkdown, suggestIssues, labelText,
 };
+
+// How far an issue is, from its column on the project board, whatever the
+// team named it: 'done', 'active' (in progress or in review), 'waiting'
+// (todo, ready, backlog...), or 'closed' when the issue itself is closed.
+export function statusTone(status, state) {
+  if (state === 'closed') return 'closed';
+  if (/done|termin|fini|fait|shipped|released|livr/i.test(status || '')) return 'done';
+  if (/progress|cours|review|revue|doing|testing|qa\b|blocked|bloqu/i.test(status || '')) return 'active';
+  return 'waiting';
+}
+
+// The status filter of the tree: 'all', a column name, 'closed', or 'none'
+// for a task not on GitHub yet.
+export function matchesStatus(issue, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'none') return !issue;
+  if (!issue) return false;
+  if (filter === 'closed') return issue.state === 'closed';
+  return issue.state !== 'closed' && issue.status === filter;
+}

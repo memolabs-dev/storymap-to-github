@@ -635,3 +635,28 @@ test('every text shown has a French translation', () => {
     assert.ok(!/[\u2013\u2014]/.test(fr), `no long dash in: ${fr}`);
   }
 });
+
+test('statusTone sorts a board column into done, active or waiting, whatever its name', () => {
+  assert.equal(core.statusTone('Done', 'open'), 'done');
+  assert.equal(core.statusTone('Terminé', 'open'), 'done');
+  assert.equal(core.statusTone('In Progress', 'open'), 'active');
+  assert.equal(core.statusTone('In review', 'open'), 'active');
+  assert.equal(core.statusTone('En cours', 'open'), 'active');
+  assert.equal(core.statusTone('Ready', 'open'), 'waiting');
+  assert.equal(core.statusTone('Todo', 'open'), 'waiting');
+  assert.equal(core.statusTone(null, 'open'), 'waiting');
+  assert.equal(core.statusTone('In Progress', 'closed'), 'closed');
+});
+
+test('matchesStatus keeps a task by its column, closed, or not on GitHub yet', () => {
+  const open = { state: 'open', status: 'Todo' };
+  const closed = { state: 'closed', status: 'Done' };
+  assert.equal(core.matchesStatus(open, 'all'), true);
+  assert.equal(core.matchesStatus(null, 'all'), true);
+  assert.equal(core.matchesStatus(open, 'Todo'), true);
+  assert.equal(core.matchesStatus(open, 'Done'), false);
+  assert.equal(core.matchesStatus(closed, 'Done'), false);
+  assert.equal(core.matchesStatus(closed, 'closed'), true);
+  assert.equal(core.matchesStatus(null, 'none'), true);
+  assert.equal(core.matchesStatus(open, 'none'), false);
+});

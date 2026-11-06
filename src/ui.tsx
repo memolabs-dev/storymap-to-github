@@ -24,7 +24,7 @@ import { emit, on } from '@create-figma-plugin/utilities'
 import { Fragment, h } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 
-import { ACTIONS, TYPES, canDo, defaultBody, draftIssue, driftKey, normalize, suggestIssues } from './core'
+import { ACTIONS, TYPES, canDo, defaultBody, draftIssue, driftKey, matchesStatus, normalize, statusTone, suggestIssues } from './core'
 import type { Action, Drift, Feature, ItemType, MapNode, Role, Task } from './core'
 import { getLang, plural, resolveLang, setLang, t } from './i18n'
 import type { LangSetting } from './i18n'
@@ -299,6 +299,7 @@ function Plugin() {
   const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('all')
   const [sprintFilter, setSprintFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [why, setWhy] = useState<Record<string, { loading?: boolean; lines?: Array<string> | null; error?: string | null }>>({})
   const [repo, setRepo] = useState('')
   const [project, setProject] = useState('')
@@ -375,19 +376,25 @@ function Plugin() {
     focus(id, true)
   }
 
-  // Filters by release and by sprint; a task stays when one of its sub-tasks matches.
+  // Filters by release, sprint and status; a task stays when one of its sub-tasks matches.
   const sprintOk = (t: Task) => {
     if (sprintFilter === 'all') return true
     const issue = issueOf(board, t.id)
     return sprintFilter === 'none' ? !(issue && issue.sprint) : Boolean(issue && issue.sprint === sprintFilter)
   }
-  const matches = (t: Task) => sprintOk(t) && (filter === 'all' || (filter === 'none' ? !t.release : t.release === filter))
+  const matches = (t: Task) =>
+    sprintOk(t) && matchesStatus(issueOf(board, t.id), statusFilter) && (filter === 'all' || (filter === 'none' ? !t.release : t.release === filter))
   const keep = (t: Task): boolean => matches(t) || (t.subtasks || []).some(keep)
-  const filtering = filter !== 'all' || sprintFilter !== 'all'
+  const filtering = filter !== 'all' || sprintFilter !== 'all' || statusFilter !== 'all'
+
+  const TONE: Record<string, string> = { done: styles.pillDone, active: styles.pillActive, waiting: styles.pillWaiting, closed: styles.pillClosed }
 
   const row = (item: MapNode & Partial<Task>, kind: Kind) => {
     const issue = kind === 'task' ? issueOf(board, item.id) : null
-    const tip = issue ? [issue.status, issue.size && t('size {size}', { size: issue.size }), issue.assignees.length ? `@${issue.assignees.join(', @')}` : ''].filter(Boolean).join(', ') : ''
+    const tip = issue ? [issue.size && t('size {size}', { size: issue.size }), issue.assignees.length ? `@${issue.assignees.join(', @')}` : t('no one assigned')].filter(Boolean).join(', ') : ''
+    // A task's release and sprint go under its title, its status on the right.
+    const meta = [item.release, issue && issue.sprint].filter(Boolean).join(' · ')
+    const status = issue ? (issue.state === 'closed' ? t('Closed') : issue.status) : null
     return (
       <div
         class={`${styles.row} ${selected === item.id ? styles.rowSelected : ''}`}
@@ -402,11 +409,13 @@ function Plugin() {
         }}
       >
         <span class={`${styles.dot} ${styles[kind]}`} title={kindLabel(kind)} />
-        <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={t('{kind}: {title}', { kind: kindLabel(kind), title: item.title })}>
-          {item.title}
+        <span class={styles.labelWrap}>
+          <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={t('{kind}: {title}', { kind: kindLabel(kind), title: item.title })}>
+            {item.title}
+          </span>
+          {meta ? <span class={styles.rowMeta}>{meta}</span> : null}
         </span>
-        {item.release ? <span class={`${styles.pill} ${styles.pillMilestone}`}>{item.release}</span> : null}
-        {issue && issue.sprint ? <span class={`${styles.pill} ${styles.pillSprint}`} title={tip}>{issue.sprint}</span> : null}
+        {status ? <span class={`${styles.pill} ${TONE[statusTone(status, issue!.state)]}`} title={tip}>{status}</span> : null}
         {kind !== 'step' && kind !== 'note' ? <Badge board={board} id={item.id} onOpen={() => open(item.id)} /> : null}
       </div>
     )
@@ -627,6 +636,10 @@ function Plugin() {
       )
     }
     const releases = ['all', ...b.milestones, ...(b.stats.withoutMilestone ? ['none'] : [])]
+    // The board's columns, in order; without a project board, the statuses the linked issues have.
+    const statuses = board.settings.statusOptions && board.settings.statusOptions.length
+      ? board.settings.statusOptions
+      : [...new Set(Object.keys(board.matches).map((id) => issueOf(board, id)?.status).filter((s): s is string => Boolean(s)))]
     const progress = linkProgress(board)
     return (
       <Fragment>
@@ -649,7 +662,7 @@ function Plugin() {
               <span class={styles.progressText}>{t('{n} of {total} linked to GitHub', { n: progress.linked, total: progress.total })}</span>
             </div>
           ) : null}
-          {b.milestones.length || board.sprints.length ? (
+          {b.milestones.length || board.sprints.length || statuses.length ? (
             <div class={styles.filters}>
               {b.milestones.length ? (
                 <Dropdown
@@ -667,6 +680,18 @@ function Plugin() {
                     { value: 'none', text: t('Not in a sprint') },
                   ]}
                   onValueChange={setSprintFilter}
+                />
+              ) : null}
+              {statuses.length ? (
+                <Dropdown
+                  value={statusFilter === 'closed' || statusFilter === 'none' || statuses.includes(statusFilter) ? statusFilter : 'all'}
+                  options={[
+                    { value: 'all', text: t('All statuses') },
+                    ...statuses.map((s) => ({ value: s, text: s })),
+                    { value: 'closed', text: t('Closed') },
+                    { value: 'none', text: t('Not on GitHub yet') },
+                  ]}
+                  onValueChange={setStatusFilter}
                 />
               ) : null}
             </div>
@@ -689,19 +714,39 @@ function Plugin() {
             {plural(b.orphans.length, '{n} item has no parent column. It is listed at the bottom.', '{n} items have no parent column. They are listed at the bottom.')}
           </div>
         ) : null}
-        <ul class={styles.tree}>
-          {b.epics.map((e) => {
-            const inner = [...e.features.map(featureTree).filter(Boolean), ...e.tasks.filter(keep).map(taskTree)]
-            if (filtering && !inner.length) return null
+        {(() => {
+          const epics = b.epics
+            .map((e) => {
+              const inner = [...e.features.map(featureTree).filter(Boolean), ...e.tasks.filter(keep).map(taskTree)]
+              if (filtering && !inner.length) return null
+              return (
+                <li key={e.id}>
+                  {row(e, 'epic')}
+                  {inner.length ? <ul>{inner}</ul> : null}
+                </li>
+              )
+            })
+            .filter(Boolean)
+          const loose = b.looseFeatures.map(featureTree).filter(Boolean)
+          if (filtering && !epics.length && !loose.length) {
             return (
-              <li key={e.id}>
-                {row(e, 'epic')}
-                {inner.length ? <ul>{inner}</ul> : null}
-              </li>
+              <p class={styles.lead}>
+                {t('No task matches these filters.')}{' '}
+                <button
+                  class={styles.linkButton}
+                  onClick={() => {
+                    setFilter('all')
+                    setSprintFilter('all')
+                    setStatusFilter('all')
+                  }}
+                >
+                  {t('Show everything')}
+                </button>
+              </p>
             )
-          })}
-          {b.looseFeatures.map(featureTree)}
-        </ul>
+          }
+          return <ul class={styles.tree}>{epics}{loose}</ul>
+        })()}
         {b.notes.length ? (
           <Fragment>
             <p class={styles.sectionTitle}>{t('Notes, not issues')}</p>
