@@ -36,6 +36,7 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  SetSizeHandler,
   ReadyHandler,
   RefreshHandler,
   ResizeWindowHandler,
@@ -70,6 +71,7 @@ interface State {
   token: string
   login: string | null
   sprints: Array<Sprint>
+  board: ProjectBoard | null
   mode: ReadingMode
   rowTypes: Record<string, ItemType>
   nodeTypes: Record<string, number>
@@ -98,6 +100,7 @@ const state: State = {
   token: '',
   login: null,
   sprints: [],
+  board: null,
   mode: 'auto',
   rowTypes: {},
   nodeTypes: {},
@@ -288,6 +291,7 @@ function publish() {
       issuesLoaded: state.issues ? state.issues.length : null,
       meta: state.meta,
       writeAllowed: state.writeAllowed,
+      sizeOptions: state.board && state.board.sizeField ? state.board.sizeField.options.map((o) => o.name) : null,
       publishing: state.publishing,
     },
   })
@@ -427,6 +431,46 @@ async function addToProject(nodeId: string, status: string | null): Promise<stri
     { project: project.id, item: added.addProjectV2ItemById.item.id, field: project.field.id, option: option.id },
   )
   return ` Added to the board in ${option.name}.`
+}
+
+// Sets the size of an issue on the project board, the product manager's
+// field. The issue is added to the board first if it is not on it yet.
+async function setSize(number: number, size: string | null) {
+  if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
+  const board = state.board
+  if (!board || !board.id || !board.sizeField) throw new Error('The project board has no size field.')
+  const key = `${state.repo}#${number}`.toLowerCase()
+  let item = board.itemIds[key]
+  if (!item) {
+    const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${number}`, { headers: githubHeaders() })
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} for #${number}.`)
+    const issue = (await res.json()) as { node_id: string }
+    const added = await graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
+      'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }',
+      { project: board.id, content: issue.node_id },
+    )
+    item = added.addProjectV2ItemById.item.id
+    board.itemIds[key] = item
+  }
+  const field = board.sizeField
+  if (size === null) {
+    await graphql('mutation($project: ID!, $item: ID!, $field: ID!) { clearProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field }) { projectV2Item { id } } }', {
+      project: board.id,
+      item,
+      field: field.id,
+    })
+  } else {
+    const option = field.options.find((o) => o.name === size)
+    if (!option) throw new Error(`The board has no size "${size}".`)
+    await graphql(
+      'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
+      { project: board.id, item, field: field.id, option: option.id },
+    )
+  }
+  const issue = state.issues && state.issues.find((i) => i.number === number)
+  if (issue) issue.size = size || undefined
+  publish()
+  emit<StatusHandler>('STATUS', { state: 'ok', text: size ? `#${number} is now size ${size}.` : `#${number} has no size now.` })
 }
 
 // Publishes one sticky as an issue: the issue, its place under its parent,
@@ -722,11 +766,13 @@ async function compare() {
   let note = `${state.issues.length} issues read from ${state.repo}.`
   let warn = false
   state.sprints = []
+  state.board = null
   if (state.project) {
     try {
       const board = await fetchProject()
       state.issues = withProject(state.issues, board)
       state.sprints = board.sprints
+      state.board = board
       note += ` Sprints read from "${board.title}" (${board.sprints.length}).`
     } catch (err) {
       warn = true
@@ -884,6 +930,10 @@ export default function () {
     if (!state.repo) return
     state.publishing = { ...state.publishing, ...change }
     void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
+  })
+
+  on<SetSizeHandler>('SET_SIZE', (number, size) => {
+    void setSize(number, size).catch(fail)
   })
 
   on<PublishHandler>('PUBLISH', (id, title, body) => {

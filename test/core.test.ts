@@ -418,3 +418,17 @@ test('each team can set its own issue text, with placeholders', () => {
   const d = core.draftIssue(feature.id, b, core.matchIssues(b, []), repoMeta, { ...publishing, bodyTemplate: template });
   assert.equal(d.body, 'Story: Find a book\nEpic: Catalogue\n- [ ] Search by title or author', 'a line left empty by a placeholder is dropped');
 });
+
+test('a project page gives the size field, its options and each card, so sizes can be set', () => {
+  const page = {
+    ...projectPage,
+    id: 'PVT_1',
+    fields: { nodes: [...projectPage.fields.nodes, { id: 'F_status', name: 'Status', options: [{ id: 's1', name: 'Ready' }] }, { id: 'F_size', name: 'Size', options: [{ id: 'o1', name: 'S' }, { id: 'o2', name: 'M' }] }] },
+    items: { ...projectPage.items, nodes: projectPage.items.nodes.map((n, i) => ({ ...n, id: `PVTI_${i}` })) },
+  };
+  const p = core.readProject([page]);
+  assert.equal(p.id, 'PVT_1');
+  assert.deepEqual(p.sizeField, { id: 'F_size', name: 'Size', options: [{ id: 'o1', name: 'S' }, { id: 'o2', name: 'M' }] });
+  assert.equal(p.itemIds['acme/library#19'], 'PVTI_0');
+  assert.equal(core.readProject([projectPage]).sizeField, null, 'a board without a size field has none');
+});

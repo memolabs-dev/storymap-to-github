@@ -139,10 +139,20 @@ export interface DriftReport {
   toConfirm: Array<{ id: string; title: string; kind: string; number: number }>
 }
 
+export interface SelectField {
+  id: string
+  name: string
+  options: Array<{ id: string; name: string }>
+}
+
 export interface ProjectBoard {
+  id: string | null
   title: string
   sprints: Array<Sprint>
   items: Record<string, { sprint?: Sprint; status?: string; size?: string }>
+  // The field that holds sizes, when the board has one, and each card's id.
+  sizeField: SelectField | null
+  itemIds: Record<string, string>
 }
 
 export interface Suggestion {

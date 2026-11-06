@@ -46,6 +46,7 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  SetSizeHandler,
   ReadyHandler,
   RefreshHandler,
   ResizeWindowHandler,
@@ -428,6 +429,23 @@ function Plugin() {
                 .filter(Boolean)
                 .join(' · ')}
             </div>
+            {board.settings.sizeOptions ? (
+              <div class={styles.sizeRow}>
+                <span class={styles.fieldLabel}>Size</span>
+                {board.settings.writeAllowed ? (
+                  <SegmentedControl
+                    value={issue.size || 'none'}
+                    options={[{ value: 'none', children: 'None' }, ...board.settings.sizeOptions.map((o) => ({ value: o, children: o }))]}
+                    onValueChange={(v: string) => {
+                      setPublishedFrom(item.id)
+                      emit<SetSizeHandler>('SET_SIZE', issue.number, v === 'none' ? null : v)
+                    }}
+                  />
+                ) : (
+                  <span>{issue.size || 'No size'}</span>
+                )}
+              </div>
+            ) : null}
             <div class={styles.actions}>
               <Button secondary onClick={() => linkTo(0)}>Not this issue</Button>
             </div>
@@ -912,11 +930,13 @@ function Plugin() {
         <span class={styles.stepTitle}>4. What the plugin may do in {repoName}</span>
         <SegmentedControl
           value={writeAllowed ? 'write' : 'read'}
-          options={[{ value: 'read', children: 'Read only' }, { value: 'write', children: 'Create issues' }]}
+          options={[{ value: 'read', children: 'Read only' }, { value: 'write', children: 'Can write' }]}
           onValueChange={(v: string) => emit<SetWriteHandler>('SET_WRITE', v === 'write')}
         />
         <p class={styles.help}>
-          {writeAllowed ? `A sticky's card can create its issue, after showing what it will be. Nothing else is changed.` : 'The plugin only reads GitHub. This is the default for every repository.'}
+          {writeAllowed
+            ? "From a sticky's card you can create its issue, after a preview, and set its size on the board. Nothing else is changed."
+            : 'The plugin only reads GitHub. This is the default for every repository.'}
         </p>
         {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>Your account cannot write to {repoName}: creating issues will fail.</div> : null}
         <details class={styles.more}>
@@ -988,7 +1008,7 @@ function Plugin() {
       <div class={styles.footer}>
         <button class={styles.mode} onClick={() => setTab('GitHub')} title="What the plugin may do on GitHub">
           {board.settings.writeAllowed ? <IconPublish16 /> : <IconLockLocked16 />}
-          {board.settings.writeAllowed ? 'Creates issues' : 'Read only'}
+          {board.settings.writeAllowed ? 'Can write' : 'Read only'}
         </button>
         <Button
           secondary

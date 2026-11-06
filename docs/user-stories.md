@@ -9,7 +9,7 @@ Each story is checked in Figma on a copy of a board, against a test repository. 
 | 1 | connect the board to our repository without knowing what a token is | I can start alone | Done ("Connect with GitHub"). An organisation that restricts OAuth Apps must approve the app first. Not yet tried with another account. |
 | 2 | see which stickies already are issues | I know what is left to write | Done: badges in the tree, labels on the board, "x of y linked" |
 | 3 | turn a sticky into an issue that carries my user story | the issue says what to build and how we will accept it | Done: the preview has an editable text, prefilled from the repository's template (persona, want, so that, acceptance criteria) |
-| 4 | set the size of an issue from the board | I keep my estimates where I plan | Not started: size is read, not written |
+| 4 | set the size of an issue from the board | I keep my estimates where I plan | Done: the card of a linked sticky sets the size on the project board (its Size field), or clears it, when the plugin may write |
 | 5 | see where the work stands: sprint, status, who is on it | I can answer "where are we?" without opening GitHub | Done, read only |
 | 6 | know where the map and GitHub disagree, and who changed what | the weekly starts from facts | Done: Differences and "Why?" |
 | 7 | rename the issue when the map is right | titles stay in the words of the map | Not started (resolving differences) |

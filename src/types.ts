@@ -43,6 +43,8 @@ export interface BoardPayload {
     // Whether the team allowed the plugin to write to this repository.
     writeAllowed: boolean
     publishing: Publishing
+    // The sizes the project board offers (its Size field), or null.
+    sizeOptions: Array<string> | null
   }
 }
 
@@ -192,6 +194,10 @@ export interface SetPublishingHandler extends EventHandler {
 export interface PublishHandler extends EventHandler {
   name: 'PUBLISH'
   handler: (id: string, title: string, body: string) => void
+}
+export interface SetSizeHandler extends EventHandler {
+  name: 'SET_SIZE'
+  handler: (number: number, size: string | null) => void
 }
 export interface ResizeWindowHandler extends EventHandler {
   name: 'RESIZE_WINDOW'

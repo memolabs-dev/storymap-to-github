@@ -594,12 +594,17 @@ function projectQuery(kind) {
   return `query($owner: String!, $number: Int!, $cursor: String) {
   owner: ${kind === 'user' ? 'user' : 'organization'}(login: $owner) {
     projectV2(number: $number) {
+      id
       title
-      fields(first: 50) { nodes { ... on ProjectV2IterationField { name configuration {
-        iterations { title startDate duration } completedIterations { title startDate duration } } } } }
+      fields(first: 50) { nodes {
+        ... on ProjectV2IterationField { name configuration {
+          iterations { title startDate duration } completedIterations { title startDate duration } } }
+        ... on ProjectV2SingleSelectField { id name options { id name } }
+      } }
       items(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
+          id
           content { ... on Issue { number repository { nameWithOwner } } }
           fieldValues(first: 30) { nodes {
             ... on ProjectV2ItemFieldIterationValue { title startDate duration }
@@ -618,10 +623,14 @@ function addDays(iso, days) {
   return d.toISOString().slice(0, 10);
 }
 
+// The board field that holds sizes or estimates, by its usual names.
+const SIZE_FIELD = /size|taille|estimat|poids|effort/i;
+
 const sprintOf = (v) => ({ title: v.title, start: v.startDate, end: addDays(v.startDate, v.duration - 1) });
 
 // pages: the `projectV2` object of each page returned by projectQuery.
-// Returns { title, sprints: [{ title, start, end }], items: { 'owner/repo#12': { sprint, status, size } } }
+// Returns { id, title, sprints: [{ title, start, end }], items: { 'owner/repo#12': { sprint, status, size } },
+//   sizeField: { id, name, options: [{ id, name }] } | null, itemIds: { 'owner/repo#12': cardId } }
 function readProject(pages) {
   const sprints = [];
   for (const field of pages[0].fields.nodes) {
@@ -629,22 +638,26 @@ function readProject(pages) {
     for (const it of [...field.configuration.completedIterations, ...field.configuration.iterations]) sprints.push(sprintOf(it));
   }
   sprints.sort((a, b) => (a.start < b.start ? -1 : 1));
+  const size = pages[0].fields.nodes.find((f) => f && f.options && SIZE_FIELD.test(f.name));
+  const sizeField = size ? { id: size.id, name: size.name, options: size.options.map((o) => ({ id: o.id, name: o.name })) } : null;
   const items = {};
+  const itemIds = {};
   for (const page of pages) {
     for (const node of page.items.nodes) {
       const issue = node.content;
       if (!issue || !issue.number) continue;
+      if (node.id) itemIds[`${issue.repository.nameWithOwner}#${issue.number}`.toLowerCase()] = node.id;
       const entry = {};
       for (const v of node.fieldValues.nodes) {
         if (!v) continue;
         if (v.startDate) entry.sprint = sprintOf(v);
         else if (v.name && v.field && /status|statut/i.test(v.field.name)) entry.status = v.name;
-        else if (v.name && v.field && /size|taille/i.test(v.field.name)) entry.size = v.name;
+        else if (v.name && v.field && SIZE_FIELD.test(v.field.name)) entry.size = v.name;
       }
       items[`${issue.repository.nameWithOwner}#${issue.number}`.toLowerCase()] = entry;
     }
   }
-  return { title: pages[0].title, sprints, items };
+  return { id: pages[0].id || null, title: pages[0].title, sprints, items, sizeField, itemIds };
 }
 
 // A Markdown draft of the backlog, to paste into an issue or a note.
