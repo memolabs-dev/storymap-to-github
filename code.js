@@ -389,6 +389,117 @@ function matchIssues(backlog, issues, links = {}) {
   return result;
 }
 
+// Drift: where the map and GitHub no longer say the same thing.
+// Only items linked to an issue (by hand, or by an identical title) are
+// compared; nothing is written anywhere.
+const RELEASE_TOKENS = /(P\d+|MVP|Release\s*\d+|R\d+|V\d+(?:\.\d+)*|Sprint\s*\d+|Milestone\s*\d+)/gi;
+
+function releaseTokens(s) {
+  return new Set([...(s || '').matchAll(RELEASE_TOKENS)].map((m) => m[1].toUpperCase().replace(/\s+/g, ' ')));
+}
+
+function sameRelease(a, b) {
+  const A = releaseTokens(a);
+  const B = releaseTokens(b);
+  if (!A.size && !B.size) return true;
+  for (const t of A) if (B.has(t)) return true;
+  return false;
+}
+
+// issues: [{ number, title, html_url, state, state_reason, milestone, parent }]
+// Returns { drifts: [{ id, title, kind, number, url, board, github }], onlyOnGitHub, onlyOnBoard, toConfirm }
+function findDrift(backlog, issues, matches) {
+  const byNumber = new Map(issues.map((i) => [i.number, i]));
+  const linked = (item) => {
+    const m = matches[item.id];
+    return m && (m.status === 'linked' || m.status === 'exists') ? byNumber.get(m.number) : null;
+  };
+  const drifts = [];
+  const onlyOnBoard = [];
+  const toConfirm = [];
+  const used = new Set();
+
+  const check = (item, kind, ancestors) => {
+    const issue = linked(item);
+    const m = matches[item.id];
+    if (!issue) {
+      if (m && m.status === 'maybe') toConfirm.push({ id: item.id, title: item.title, kind, number: m.number });
+      else onlyOnBoard.push({ id: item.id, title: item.title, kind });
+      return;
+    }
+    used.add(issue.number);
+    const base = { id: item.id, title: item.title, number: issue.number, url: issue.html_url };
+    if (issue.state === 'closed' && (issue.state_reason === 'not_planned' || issue.state_reason === 'duplicate')) {
+      drifts.push({ ...base, kind: 'dropped', board: 'Still on the map', github: issue.state_reason === 'duplicate' ? 'Closed as duplicate' : 'Closed as not planned' });
+    }
+    if (normalize(item.title) !== normalize(issue.title)) drifts.push({ ...base, kind: 'title', board: item.title, github: issue.title });
+    if (kind === 'task' && !sameRelease(item.release, issue.milestone)) {
+      drifts.push({ ...base, kind: 'milestone', board: item.release || 'No release row', github: issue.milestone || 'No milestone' });
+    }
+    const expected = ancestors.map(linked).filter(Boolean);
+    if (expected.length && !expected.some((p) => p.number === issue.parent)) {
+      const parent = issue.parent ? byNumber.get(issue.parent) : null;
+      drifts.push({
+        ...base,
+        kind: 'parent',
+        board: `Under ${expected.map((p) => `#${p.number}`).join(' or ')}`,
+        github: parent ? `Under #${parent.number} ${parent.title}` : issue.parent ? `Under #${issue.parent}` : 'No parent issue',
+      });
+    }
+  };
+
+  const walkTasks = (tasks, ancestors) => {
+    for (const t of tasks) {
+      check(t, 'task', ancestors);
+      walkTasks(t.subtasks || [], [t, ...ancestors]);
+    }
+  };
+  for (const epic of backlog.epics) {
+    check(epic, 'epic', []);
+    walkTasks(epic.tasks, [epic]);
+    for (const f of epic.features) {
+      check(f, 'feature', [epic]);
+      walkTasks(f.tasks, [f, epic]);
+    }
+  }
+  for (const f of backlog.looseFeatures) {
+    check(f, 'feature', []);
+    walkTasks(f.tasks, [f]);
+  }
+
+  const order = { dropped: 0, milestone: 1, parent: 2, title: 3 };
+  drifts.sort((a, b) => order[a.kind] - order[b.kind]);
+  const onlyOnGitHub = issues
+    .filter((i) => i.state === 'open' && !used.has(i.number))
+    .map((i) => ({ number: i.number, title: i.title, url: i.html_url, milestone: i.milestone }));
+  return { drifts, onlyOnGitHub, onlyOnBoard, toConfirm };
+}
+
+// The "why" of a drift, read from the issue's history on GitHub.
+// events: the raw list from GET /repos/{owner}/{repo}/issues/{n}/events
+function explainEvents(events, kind) {
+  const wanted = {
+    title: ['renamed'],
+    milestone: ['milestoned', 'demilestoned'],
+    parent: ['parent_issue_added', 'parent_issue_removed'],
+    dropped: ['closed', 'reopened'],
+  }[kind] || [];
+  const day = (iso) => (iso || '').slice(0, 10);
+  return events
+    .filter((e) => wanted.includes(e.event))
+    .map((e) => {
+      const who = e.actor ? `@${e.actor.login}` : 'someone';
+      const when = day(e.created_at);
+      if (e.event === 'renamed') return `${when}, ${who} renamed it from "${e.rename.from}" to "${e.rename.to}"`;
+      if (e.event === 'milestoned') return `${when}, ${who} set the milestone to ${e.milestone.title}`;
+      if (e.event === 'demilestoned') return `${when}, ${who} removed the milestone ${e.milestone.title}`;
+      if (e.event === 'parent_issue_added') return `${when}, ${who} set its parent issue`;
+      if (e.event === 'parent_issue_removed') return `${when}, ${who} removed its parent issue`;
+      if (e.event === 'closed') return `${when}, ${who} closed it${e.commit_id ? ` with commit ${e.commit_id.slice(0, 7)}` : ''}`;
+      return `${when}, ${who} reopened it`;
+    });
+}
+
 // A Markdown draft of the backlog, to paste into an issue or a note.
 function toMarkdown(backlog, matches = {}) {
   const ref = (item) => {
@@ -417,7 +528,7 @@ function toMarkdown(backlog, matches = {}) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, toMarkdown };
+  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, toMarkdown };
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +614,7 @@ if (typeof figma !== 'undefined') {
       matches: state.matches,
       issues: state.issues ? state.issues.map((i) => ({ number: i.number, title: i.title })) : [],
       nodeTypes: state.nodeTypes,
+      drift: state.issues ? findDrift(state.backlog, state.issues, state.matches) : null,
       markdown: toMarkdown(state.backlog, state.matches),
       settings: { repo: state.repo, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
     });
@@ -522,7 +634,16 @@ if (typeof figma !== 'undefined') {
         throw new Error(`GitHub answered ${res.status}.`);
       }
       const batch = await res.json();
-      all.push(...batch.filter((i) => !i.pull_request).map((i) => ({ number: i.number, title: i.title, html_url: i.html_url, state: i.state, type: i.type ? i.type.name : null })));
+      all.push(...batch.filter((i) => !i.pull_request).map((i) => ({
+        number: i.number,
+        title: i.title,
+        html_url: i.html_url,
+        state: i.state,
+        state_reason: i.state_reason || null,
+        type: i.type ? i.type.name : null,
+        milestone: i.milestone ? i.milestone.title : null,
+        parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
+      })));
       if (batch.length < 100) break;
     }
     return all;
@@ -554,6 +675,14 @@ if (typeof figma !== 'undefined') {
         state.issues = await fetchIssues();
         publish();
         figma.ui.postMessage({ type: 'status', state: 'ok', text: `${state.issues.length} issues read from ${state.repo}.` });
+      } else if (msg.type === 'why') {
+        const headers = { Accept: 'application/vnd.github+json' };
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${msg.number}/events?per_page=100`, { headers });
+        const lines = res.ok ? explainEvents(await res.json(), msg.kind) : null;
+        figma.ui.postMessage({ type: 'why-result', key: msg.key, lines, error: res.ok ? null : `GitHub answered ${res.status}.` });
+      } else if (msg.type === 'open') {
+        if (/^https:\/\/github\.com\//.test(msg.url)) figma.openExternal(msg.url);
       } else if (msg.type === 'link') {
         if (msg.number === null) delete state.links[msg.id];
         else state.links[msg.id] = msg.number;

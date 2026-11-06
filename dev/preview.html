@@ -35,6 +35,8 @@
     frame.contentWindow.postMessage({ pluginMessage: {
       type: 'board', scope: 'page', page: 'Story map', palette, legend, backlog, matches,
       issues: issues ? issues.map((i) => ({ number: i.number, title: i.title })) : [],
+      drift: issues ? findDrift(backlog, issues, matches) : null,
+      nodeTypes: { STICKY: items.length },
       markdown: toMarkdown(backlog, matches),
       settings: { repo, hasToken: false, issuesLoaded: issues ? issues.length : null },
     } }, '*');
@@ -46,13 +48,22 @@
     document.getElementById('log').textContent = JSON.stringify(msg) + '\n' + document.getElementById('log').textContent;
     if (msg.type === 'ready' || msg.type === 'refresh') post();
     if (msg.type === 'set-legend') { legend[msg.hex] = msg.value; post(); }
+    if (msg.type === 'why') {
+      const res = await fetch(`https://api.github.com/repos/${repo}/issues/${msg.number}/events?per_page=100`);
+      const lines = res.ok ? explainEvents(await res.json(), msg.kind) : null;
+      frame.contentWindow.postMessage({ pluginMessage: { type: 'why-result', key: msg.key, lines, error: res.ok ? null : `GitHub answered ${res.status}.` } }, '*');
+    }
     if (msg.type === 'link') { if (msg.number === null) delete links[msg.id]; else links[msg.id] = msg.number; post(); }
     if (msg.type === 'compare') {
       repo = (msg.repo || '').trim();
       try {
         const res = await fetch(`https://api.github.com/repos/${repo}/issues?state=all&per_page=100`);
         if (!res.ok) throw new Error(`GitHub answered ${res.status}.`);
-        issues = (await res.json()).filter((i) => !i.pull_request);
+        issues = (await res.json()).filter((i) => !i.pull_request).map((i) => ({
+          number: i.number, title: i.title, html_url: i.html_url, state: i.state, state_reason: i.state_reason || null,
+          type: i.type ? i.type.name : null, milestone: i.milestone ? i.milestone.title : null,
+          parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
+        }));
         post();
         frame.contentWindow.postMessage({ pluginMessage: { type: 'status', state: 'ok', text: `${issues.length} issues read from ${repo}.` } }, '*');
       } catch (err) {

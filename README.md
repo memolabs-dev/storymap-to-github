@@ -18,6 +18,12 @@ Product owners plan in FigJam, developers work in GitHub Issues and Projects, an
 
 Comparing with GitHub, in the GitHub tab, reads the issues of a repository and matches titles (case, accents, `Epic:` prefixes and small words ignored). A match is a guess: click a badge to confirm it, pick the right issue, or mark the item as not on GitHub yet. Those choices stay on your computer.
 
+## Drift: where the map and GitHub disagree
+
+Once stickies are linked to issues, the Drift tab lists where the plan and the work no longer say the same thing: a task in another release row than its milestone, an issue under another parent than on the map, a renamed issue, an issue closed as not planned while the map still has it. It also lists the stickies with no issue and the open issues that are not on the map.
+
+**Why?** reads the issue's history on GitHub and says who changed what, and when ("2026-11-05, @someone set the milestone to P0"). Nothing is changed on either side: the team decides which one is right.
+
 ## Try it
 
 You need the Figma desktop app; development plugins do not load in the browser.

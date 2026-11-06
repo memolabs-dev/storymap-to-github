@@ -97,6 +97,17 @@
   button.pill { border: 0; cursor: pointer; min-height: 22px; }
   button.pill:hover { filter: brightness(0.95); }
   .pill-select { width: 150px; height: 24px; font-size: 11px; flex: none; }
+  .drift { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
+  .drift-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .drift-head .label { text-align: left; font-weight: 500; text-decoration: none; }
+  .drift-head .label:hover { text-decoration: underline; }
+  .drift-sides { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 2px 8px; margin-bottom: 4px; }
+  .drift-sides span { color: var(--text-3); }
+  .drift-sides b { font-weight: 400; overflow-wrap: anywhere; }
+  .btn.small { height: 24px; padding: 0 8px; font-size: 11px; }
+  .history { margin: 4px 0 0; padding-left: 16px; color: var(--text-2); }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--text-2); font-weight: 500; padding: 4px 0; }
   .section-title { color: var(--text-2); font-weight: 600; margin: 16px 0 6px; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; }
 
   .legend-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 110px; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -122,6 +133,7 @@
   <p class="scope" id="scope">Reading the board…</p>
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-tab="preview">Preview</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="drift">Drift<span class="count" id="drift-count"></span></button>
     <button class="tab" role="tab" aria-selected="false" data-tab="legend">Legend<span class="count" id="legend-count"></span></button>
     <button class="tab" role="tab" aria-selected="false" data-tab="github">GitHub</button>
   </nav>
@@ -129,6 +141,7 @@
 
 <main>
   <section id="tab-preview" role="tabpanel"></section>
+  <section id="tab-drift" role="tabpanel" hidden></section>
   <section id="tab-legend" role="tabpanel" hidden>
     <p class="help" style="margin:0 0 8px">Each sticky colour on the board becomes one kind of item. Change a line to fix the reading.</p>
     <div id="legend"></div>
@@ -177,8 +190,7 @@
   };
 
   const linkPicker = (id) => {
-    const current = data.matches[id] || {};
-    const options = data.issues.map((i) => `<option value="${i.number}" ${current.number === i.number ? 'selected' : ''}>#${i.number} ${esc(i.title)}</option>`).join('');
+    const options = data.issues.map((i) => `<option value="${i.number}">#${i.number} ${esc(i.title)}</option>`).join('');
     return `<select class="pill-select" data-link-select="${esc(id)}" aria-label="GitHub issue for this item">
       <option value="">Is it an existing issue?</option>
       <option value="0">Not on GitHub yet</option>
@@ -267,6 +279,43 @@
       ${b.ignored} stickies skipped (legend, labels, empty or ignored colours).</p>`);
   }
 
+  // Drift: where the map and GitHub disagree, and, on demand, why.
+  const DRIFT_LABEL = { dropped: 'Dropped on GitHub', milestone: 'Milestone', parent: 'Parent', title: 'Title' };
+  const whyCache = {};
+
+  function renderDrift() {
+    const el = $('tab-drift');
+    const d = data.drift;
+    $('drift-count').textContent = d && d.drifts.length ? ` ${d.drifts.length}` : '';
+    if (!d) {
+      el.innerHTML = '<div class="empty"><b>Compare with a repository first</b>Open <button class="linkish" data-goto="github">GitHub</button>, name the repository and press Compare. Drift needs to know which issue each sticky is.</div>';
+      return;
+    }
+    const issueLink = (n, url) => `<button class="linkish" data-open="${esc(url)}">#${n}</button>`;
+    const card = (x) => {
+      const key = `${x.id}:${x.kind}:${x.number}`;
+      const why = whyCache[key];
+      const whyHtml = !why ? `<button class="btn ghost small" data-why="${esc(key)}" data-number="${x.number}" data-kind="${x.kind}">Why?</button>`
+        : why.loading ? '<p class="help">Reading the history…</p>'
+        : why.error ? `<p class="help">${esc(why.error)}</p>`
+        : why.lines.length ? `<ul class="history">${why.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`
+        : '<p class="help">No change recorded on GitHub: it has differed since the issue was written.</p>';
+      return `<div class="drift">
+        <div class="drift-head"><span class="pill maybe">${DRIFT_LABEL[x.kind]}</span>
+          <button class="linkish label" data-focus="${esc(x.id)}" title="Show on the board">${esc(x.title)}</button>${issueLink(x.number, x.url)}</div>
+        <div class="drift-sides"><span>Map</span><b>${esc(x.board)}</b><span>GitHub</span><b>${esc(x.github)}</b></div>
+        ${whyHtml}
+      </div>`;
+    };
+    const list = (items, render) => items.map(render).join('');
+    el.innerHTML = `
+      ${d.drifts.length ? `<p class="help" style="margin:0 0 8px">${d.drifts.length} place${d.drifts.length > 1 ? 's' : ''} where the map and GitHub disagree. Nothing is changed: decide with the team which side is right.</p>${list(d.drifts, card)}`
+        : '<div class="notice ok">The linked stickies and their issues agree.</div>'}
+      ${d.toConfirm.length ? `<details><summary>${d.toConfirm.length} possible match${d.toConfirm.length > 1 ? 'es' : ''} to confirm</summary><p class="help">Confirm them from the badge in Preview, then they are compared here.</p>${list(d.toConfirm, (x) => `<div class="row" data-id="${esc(x.id)}"><span class="dot ${x.kind}"></span><span class="label">${esc(x.title)}</span><span class="pill maybe">#${x.number}?</span></div>`)}</details>` : ''}
+      ${d.onlyOnBoard.length ? `<details><summary>${d.onlyOnBoard.length} on the map, no issue linked</summary>${list(d.onlyOnBoard, (x) => `<div class="row" data-id="${esc(x.id)}"><span class="dot ${x.kind}"></span><span class="label">${esc(x.title)}</span></div>`)}</details>` : ''}
+      ${d.onlyOnGitHub.length ? `<details><summary>${d.onlyOnGitHub.length} open issue${d.onlyOnGitHub.length > 1 ? 's' : ''} not on the map</summary>${list(d.onlyOnGitHub, (i) => `<div class="row"><span class="label">${issueLink(i.number, i.url)} ${esc(i.title)}</span>${i.milestone ? `<span class="pill milestone">${esc(i.milestone)}</span>` : ''}</div>`)}</details>` : ''}`;
+  }
+
   function renderGithub() {
     const s = data.settings;
     if (document.activeElement !== $('repo')) $('repo').value = s.repo || '';
@@ -279,11 +328,23 @@
     const matched = data.settings.issuesLoaded !== null ? ` · compared with ${data.settings.issuesLoaded} issues of <strong>${esc(data.settings.repo)}</strong>` : '';
     $('scope').innerHTML = `Reading ${what}${matched}`;
     renderPreview();
+    renderDrift();
     renderLegend();
     renderGithub();
   }
 
   document.addEventListener('click', (e) => {
+    const open = e.target.closest('[data-open]');
+    if (open) { send({ type: 'open', url: open.dataset.open }); return; }
+    const focus = e.target.closest('[data-focus]');
+    if (focus) { send({ type: 'focus', id: focus.dataset.focus }); return; }
+    const why = e.target.closest('[data-why]');
+    if (why) {
+      whyCache[why.dataset.why] = { loading: true };
+      renderDrift();
+      send({ type: 'why', key: why.dataset.why, number: Number(why.dataset.number), kind: why.dataset.kind });
+      return;
+    }
     const pill = e.target.closest('[data-link]');
     if (pill) {
       if (!data.issues.length) { document.querySelector('.tab[data-tab="github"]').click(); return; }
@@ -330,6 +391,7 @@
     const msg = event.data && event.data.pluginMessage;
     if (!msg) return;
     if (msg.type === 'board') { data = msg; render(); }
+    else if (msg.type === 'why-result') { whyCache[msg.key] = msg.error ? { error: msg.error } : { lines: msg.lines }; renderDrift(); }
     else if (msg.type === 'status') {
       $('gh-status').innerHTML = `<div class="notice ${msg.state === 'error' ? 'error' : msg.state === 'ok' ? 'ok' : 'info'}" role="status">${esc(msg.text)}</div>`;
     } else if (msg.type === 'selection-changed' && data && !$('reread')) {

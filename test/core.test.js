@@ -182,6 +182,56 @@ test('arrows on the board set the parent and make sub-tasks', () => {
   assert.match(core.toMarkdown(b), / {4}- \[ \] Sub-task: Barcode scan · P0 · MVP/);
 });
 
+test('drift lists where linked issues no longer match the map', () => {
+  const b = core.buildBacklog(board(), legend);
+  const id = (title) => find(b, title).id;
+  const issue = (number, title, extra = {}) => ({ number, title, html_url: `u${number}`, state: 'open', state_reason: null, milestone: null, parent: null, ...extra });
+  const issues = [
+    issue(11, 'Épopée : Catalogue'),
+    issue(12, 'Épopée : Borrowing'),
+    issue(19, 'Back-office for staff', { milestone: 'P0 · MVP', parent: 11 }),
+    issue(3, 'Import books from a spreadsheet', { milestone: 'P0 · MVP', parent: 11 }),
+    issue(20, 'Reservation calendar', { milestone: 'P0 · MVP', parent: 11 }),
+    issue(30, 'Extra work nobody mapped'),
+    issue(31, 'Old idea', { state: 'closed', state_reason: 'completed' }),
+  ];
+  const links = { [id('Back-office')]: 19, [id('Import books from a spreadsheet')]: 3, [id('Reservation calendar')]: 20 };
+  const d = core.findDrift(b, issues, core.matchIssues(b, issues, links));
+  const kinds = (title) => d.drifts.filter((x) => x.title === title).map((x) => x.kind);
+  assert.deepEqual(kinds('Back-office'), ['title'], 'renamed on GitHub');
+  assert.deepEqual(kinds('Import books from a spreadsheet'), ['milestone'], 'P1 on the map, P0 on GitHub');
+  assert.deepEqual(kinds('Reservation calendar'), ['parent'], 'under Borrowing on the map, under Catalogue on GitHub');
+  assert.deepEqual(kinds('Catalogue'), [], 'an epic prefix is not a drift');
+  assert.deepEqual(d.onlyOnGitHub.map((i) => i.number), [30], 'closed issues are not reported as unmapped');
+  assert.ok(d.onlyOnBoard.some((x) => x.title === 'Find a book'));
+  assert.equal(d.drifts[0].kind, 'milestone', 'the most serious drifts come first');
+});
+
+test('an issue closed as not planned is a drift while the map still has it', () => {
+  const b = core.buildBacklog(board(), legend);
+  const issues = [{ number: 19, title: 'Back-office', html_url: 'u', state: 'closed', state_reason: 'not_planned', milestone: 'P0 · MVP', parent: null }];
+  const d = core.findDrift(b, issues, core.matchIssues(b, issues));
+  assert.deepEqual(d.drifts.map((x) => x.kind), ['dropped']);
+});
+
+test('release names compare by their tags', () => {
+  assert.ok(core.sameRelease('P0 · MVP', 'P0 · MVP'));
+  assert.ok(core.sameRelease('P0 · MVP', 'MVP'));
+  assert.ok(!core.sameRelease('P1', 'P0 · MVP'));
+  assert.ok(!core.sameRelease('P1', null));
+});
+
+test('the why comes from the issue history', () => {
+  const events = [
+    { event: 'labeled', actor: { login: 'a' }, created_at: '2026-11-04T15:14:34Z' },
+    { event: 'milestoned', actor: { login: 'guillaume' }, created_at: '2026-11-05T13:48:18Z', milestone: { title: 'P1' } },
+    { event: 'renamed', actor: { login: 'sam' }, created_at: '2026-11-05T21:38:53Z', rename: { from: 'Automate the countries', to: 'Countries from the survival forms' } },
+  ];
+  assert.deepEqual(core.explainEvents(events, 'title'), ['2026-11-05, @sam renamed it from "Automate the countries" to "Countries from the survival forms"']);
+  assert.deepEqual(core.explainEvents(events, 'milestone'), ['2026-11-05, @guillaume set the milestone to P1']);
+  assert.deepEqual(core.explainEvents(events, 'parent'), []);
+});
+
 test('the Markdown draft lists the tree', () => {
   const md = core.toMarkdown(core.buildBacklog(board(), legend));
   assert.match(md, /## Epic: Catalogue/);
