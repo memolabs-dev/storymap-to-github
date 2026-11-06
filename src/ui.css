@@ -63,7 +63,7 @@
 .driftSides { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 2px 8px; margin-bottom: 4px; }
 .driftSide { color: var(--figma-color-text-tertiary); }
 .history { margin: 4px 0 0; padding-left: 16px; color: var(--figma-color-text-secondary); }
-.step { border-bottom: 1px solid var(--figma-color-border); padding: 10px 0; }
+.setupStep { border-bottom: 1px solid var(--figma-color-border); padding: 10px 0; }
 .stepTitle { display: block; font-weight: 600; margin-bottom: 6px; }
 .stepRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .userCode { font-family: var(--font-family-mono, ui-monospace, monospace); font-size: 22px; letter-spacing: 3px; font-weight: 600; padding: 8px 0; user-select: all; }

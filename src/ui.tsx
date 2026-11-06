@@ -732,7 +732,7 @@ function Plugin() {
         <div style={{ height: 12 }} />
         {status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
 
-        <div class={styles.step}>
+        <div class={styles.setupStep}>
           <span class={styles.stepTitle}>1. Your GitHub account</span>
           {auth.state === 'error' ? <div class={`${styles.notice} ${styles.error}`}>{auth.error}</div> : null}
           {signedIn ? (
@@ -808,7 +808,7 @@ function Plugin() {
         </div>
 
         {s.hasToken ? (
-          <div class={styles.step}>
+          <div class={styles.setupStep}>
             <span class={styles.stepTitle}>2. Repository</span>
             {s.repo && !changingRepo ? (
               <div class={styles.stepRow}>
@@ -832,7 +832,7 @@ function Plugin() {
         ) : null}
 
         {s.hasToken && s.repo && !changingRepo ? (
-          <div class={styles.step}>
+          <div class={styles.setupStep}>
             <span class={styles.stepTitle}>3. Project board, for sprints and status</span>
             {projects === null ? (
               <p class={styles.help}>Looking for the boards of {s.repo}…</p>

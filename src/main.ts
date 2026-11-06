@@ -656,6 +656,11 @@ async function useToken(token: string) {
   await figma.clientStorage.setAsync('login', state.login)
   publish()
   await listRepos()
+  // The board's repository, if one was picked before, is read again at once.
+  if (state.repo) {
+    await listProjects()
+    await compare()
+  }
 }
 
 // The repositories the account can see, most recently pushed first.
@@ -855,6 +860,7 @@ export default function () {
       await figma.clientStorage.deleteAsync('token')
       await figma.clientStorage.deleteAsync('login')
       publish()
+      emit<StatusHandler>('STATUS', { state: 'ok', text: 'Signed out. The token is forgotten on this computer.' })
     })().catch(fail)
   })
 
