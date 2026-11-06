@@ -67,6 +67,7 @@
 .driftHead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .driftSides { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 2px 8px; margin-bottom: 4px; }
 .driftSide { color: var(--figma-color-text-secondary); }
+.settle { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 4px; }
 .history { margin: 4px 0 0; padding-left: 16px; color: var(--figma-color-text-secondary); }
 .setupStep { border-bottom: 1px solid var(--figma-color-border); padding: 10px 0; }
 .stepTitle { display: block; font-weight: 600; margin-bottom: 6px; }

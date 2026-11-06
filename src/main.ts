@@ -9,6 +9,8 @@ import {
   buildPalette,
   defaultLegend,
   draftIssue,
+  driftKey,
+  sameRelease,
   explainEvents,
   findDrift,
   labelText,
@@ -36,6 +38,7 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  ResolveHandler,
   SetSizeHandler,
   ReadyHandler,
   RefreshHandler,
@@ -210,6 +213,90 @@ function writeLink(id: string, number: number | null) {
   else state.links[id] = number
 }
 
+// Differences the team keeps on purpose, on each sticky and per repository,
+// so the whole team stops seeing them; one comes back when either side changes.
+const keptKey = () => `kept:${state.repo.toLowerCase()}`
+
+function readKept(): Record<string, Array<string>> {
+  const kept: Record<string, Array<string>> = {}
+  if (!state.repo) return kept
+  for (const [id, node] of stickies) {
+    const value = node.getPluginData(keptKey())
+    if (value) kept[id] = JSON.parse(value) as Array<string>
+  }
+  return kept
+}
+
+// Settles one difference. Only what the person picked is changed, and the
+// plugin's own copy of the issue is updated at once (GitHub's list can lag).
+async function resolve(id: string, key: string, side: 'map' | 'github' | 'keep') {
+  if (!state.backlog || !state.issues) return
+  const drift = findDrift(state.backlog, state.issues, state.matches).drifts.find((d) => d.id === id && driftKey(d) === key)
+  if (!drift) throw new Error('This difference is already settled.')
+  emit<StatusHandler>('STATUS', { state: 'loading', text: side === 'keep' ? 'Keeping both…' : side === 'github' ? 'Changing the sticky…' : `Changing #${drift.number} on GitHub…` })
+  const node = stickies.get(id)
+  if (side === 'keep') {
+    if (!node) throw new Error('The sticky is not on this page.')
+    const list = node.getPluginData(keptKey()) ? (JSON.parse(node.getPluginData(keptKey())) as Array<string>) : []
+    node.setPluginData(keptKey(), JSON.stringify([...list, key]))
+    publish()
+    emit<StatusHandler>('STATUS', { state: 'ok', text: `Kept as it is: #${drift.number} will not show here again unless it changes.` })
+    return
+  }
+  if (side === 'github') {
+    if (drift.kind !== 'title' || !node) throw new Error('Only a title can be taken from GitHub onto the map.')
+    const issue = state.issues.find((i) => i.number === drift.number)
+    if (!issue) return
+    await figma.loadFontAsync(node.text.fontName as FontName)
+    node.text.characters = issue.title
+    readBoard()
+    publish()
+    emit<StatusHandler>('STATUS', { state: 'ok', text: `The sticky now reads "${issue.title}".` })
+    return
+  }
+  if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
+  const issue = state.issues.find((i) => i.number === drift.number)
+  if (!issue) return
+  const patch = async (body: Record<string, unknown>) => {
+    const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${drift.number}`, {
+      method: 'PATCH',
+      headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`GitHub refused the change (${res.status}).`)
+    return (await res.json()) as RawIssue & { id: number }
+  }
+  let text = ''
+  if (drift.kind === 'title') {
+    await patch({ title: drift.target })
+    issue.title = String(drift.target)
+    text = `#${drift.number} is now "${issue.title}".`
+  } else if (drift.kind === 'milestone') {
+    const release = drift.target ? String(drift.target) : null
+    const milestone = release ? (state.meta ? state.meta.milestones.find((m) => sameRelease(release, m.title)) : null) : null
+    if (release && !milestone) throw new Error(`No milestone on GitHub matches "${release}". Create it on GitHub first.`)
+    await patch({ milestone: milestone ? milestone.number : null })
+    issue.milestone = milestone ? milestone.title : null
+    text = milestone ? `#${drift.number} is now in ${milestone.title}.` : `#${drift.number} has no milestone now.`
+  } else if (drift.kind === 'parent') {
+    const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${drift.number}`, { headers: githubHeaders() })
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} for #${drift.number}.`)
+    const raw = (await res.json()) as { id: number }
+    const moved = await fetch(`https://api.github.com/repos/${state.repo}/issues/${drift.target}/sub_issues`, {
+      method: 'POST',
+      headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub_issue_id: raw.id, replace_parent: true }),
+    })
+    if (!moved.ok) throw new Error(`GitHub refused to move #${drift.number} under #${drift.target} (${moved.status}).`)
+    issue.parent = Number(drift.target)
+    text = `#${drift.number} is now under #${drift.target}.`
+  } else {
+    throw new Error('This difference is settled on GitHub by hand: open the issue.')
+  }
+  publish()
+  emit<StatusHandler>('STATUS', { state: 'ok', text })
+}
+
 // Links made before they lived in the file were kept on this computer only;
 // they are moved onto the stickies once, for the repository then connected.
 async function moveOldLinks() {
@@ -259,6 +346,16 @@ function linkedIssue(id: string): Issue | null {
 function publish() {
   state.backlog = buildBacklog(state.items, state.legend, { mode: state.mode, rowTypes: state.rowTypes })
   state.matches = state.issues ? matchIssues(state.backlog, state.issues, state.links) : {}
+  // A sticky matched by an identical title is linked for good, so a later
+  // rename on either side shows as a difference instead of losing the link.
+  let saved = false
+  for (const [id, m] of Object.entries(state.matches)) {
+    if (m.status === 'exists' && m.number && !(id in state.links)) {
+      writeLink(id, m.number)
+      saved = true
+    }
+  }
+  if (saved && state.issues) state.matches = matchIssues(state.backlog, state.issues, state.links)
   emit<BoardHandler>('BOARD', {
     page: figma.currentPage.name,
     palette: state.palette,
@@ -276,7 +373,7 @@ function publish() {
       assignees: i.assignees || [],
     })),
     sprints: state.sprints,
-    drift: state.issues ? findDrift(state.backlog, state.issues, state.matches) : null,
+    drift: state.issues ? findDrift(state.backlog, state.issues, state.matches, readKept()) : null,
     nodeTypes: state.nodeTypes,
     markdown: toMarkdown(state.backlog, state.matches),
     labelsOn: state.labelsOn,
@@ -813,6 +910,7 @@ export default function () {
   on<RefreshHandler>('REFRESH', () => {
     readBoard()
     publish()
+    if (state.repo) void compare().catch(fail)
   })
 
   on<SetModeHandler>('SET_MODE', (mode) => {
@@ -930,6 +1028,10 @@ export default function () {
     if (!state.repo) return
     state.publishing = { ...state.publishing, ...change }
     void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
+  })
+
+  on<ResolveHandler>('RESOLVE', (id, key, side) => {
+    void resolve(id, key, side).catch(fail)
   })
 
   on<SetSizeHandler>('SET_SIZE', (number, size) => {

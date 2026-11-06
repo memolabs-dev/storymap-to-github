@@ -23,7 +23,7 @@ import { emit, on } from '@create-figma-plugin/utilities'
 import { Fragment, h } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 
-import { DEFAULT_BODY, draftIssue, normalize, suggestIssues } from './core'
+import { DEFAULT_BODY, draftIssue, driftKey, normalize, suggestIssues } from './core'
 import type { Drift, Feature, ItemType, MapNode, Task } from './core'
 import type {
   AuthHandler,
@@ -46,6 +46,7 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  ResolveHandler,
   SetSizeHandler,
   ReadyHandler,
   RefreshHandler,
@@ -270,6 +271,7 @@ function Plugin() {
   const [changingRepo, setChangingRepo] = useState(false)
   const [useToken, setUseToken] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
+  const [resolving, setResolving] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ drifts: true })
   const [startLabel, setStartLabel] = useState<string | null>(null)
   const [startStatus, setStartStatus] = useState<string | null>(null)
@@ -632,6 +634,44 @@ function Plugin() {
     )
   }
 
+  // The three ways to settle a difference. "The map is right" changes GitHub
+  // and needs write access; "GitHub is right" changes the sticky (titles
+  // only); "Keep both" hides it until either side changes.
+  const settle = (x: Drift) => {
+    const key = driftKey(x)
+    const go = (side: 'map' | 'github' | 'keep') => {
+      setResolving(key)
+      emit<ResolveHandler>('RESOLVE', x.id, key, side)
+    }
+    const mapLabel: Record<string, string> = {
+      title: 'Rename the issue',
+      milestone: x.target ? `Set milestone ${x.target}` : 'Remove the milestone',
+      parent: `Move under #${x.target}`,
+    }
+    const canFix = x.kind in mapLabel
+    return (
+      <div class={styles.settle}>
+        {canFix ? (
+          board.settings.writeAllowed ? (
+            <Button onClick={() => go('map')} title="The map is right: change GitHub">
+              {mapLabel[x.kind]}
+            </Button>
+          ) : (
+            <span class={styles.help}>To change GitHub from here, choose Can write in GitHub.</span>
+          )
+        ) : null}
+        {x.kind === 'title' ? (
+          <Button secondary onClick={() => go('github')} title="GitHub is right: change the sticky">
+            Rename the sticky
+          </Button>
+        ) : null}
+        <Button secondary onClick={() => go('keep')} title="Both are right: stop showing this difference">
+          Keep both
+        </Button>
+      </div>
+    )
+  }
+
   const toggleSection = (key: string) => setOpenSections((o) => ({ ...o, [key]: !o[key] }))
 
   const drift = () => {
@@ -648,8 +688,9 @@ function Plugin() {
     }
     return (
       <Fragment>
+        {resolving && status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
         {d.drifts.length ? (
-          <p class={styles.lead}>{d.drifts.length === 1 ? 'One place' : `${d.drifts.length} places`} where the map and GitHub disagree. Nothing is changed: decide with the team which side is right.</p>
+          <p class={styles.lead}>{d.drifts.length === 1 ? 'One place' : `${d.drifts.length} places`} where the map and GitHub disagree. Pick which side is right; nothing changes until you do.</p>
         ) : (
           <div class={`${styles.notice} ${styles.ok}`}>The linked stickies and their issues agree.</div>
         )}
@@ -667,6 +708,7 @@ function Plugin() {
                 <span class={styles.driftSide}>Map</span><span>{x.board}</span>
                 <span class={styles.driftSide}>GitHub</span><span>{x.github}</span>
               </div>
+              {settle(x)}
               {!w ? (
                 <Button
                   secondary

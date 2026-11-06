@@ -37,7 +37,9 @@ The Drift tab lists where the plan and the work no longer say the same thing: a 
 
 **Sprints.** Name the GitHub Projects board in the GitHub tab to read each issue's sprint, status and size. Tasks then carry their sprint, the preview filters by sprint, and Drift flags a task whose sprint ends after the due date of its release on the map. The board is listed once you are connected.
 
-**Why?** reads the issue's history on GitHub and says who changed what, and when ("2026-11-05, @someone set the milestone to P0"). Nothing is changed on either side: the team decides which one is right.
+**Why?** reads the issue's history on GitHub and says who changed what, and when ("2026-11-05, @someone set the milestone to P0").
+
+**Settling a difference.** Each one offers its choices, and nothing changes until one is picked: the map is right (the plugin renames the issue, sets its milestone from the release row, or moves it under the parent on the map), GitHub is right (for a title, the sticky takes the issue's title), or keep both, which hides the difference for the whole team until either side changes again. Changing GitHub needs the plugin to be allowed to write to the repository.
 
 ## Try it
 

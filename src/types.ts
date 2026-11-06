@@ -199,6 +199,12 @@ export interface SetSizeHandler extends EventHandler {
   name: 'SET_SIZE'
   handler: (number: number, size: string | null) => void
 }
+// Settles one difference: the map is right (GitHub is changed), GitHub is
+// right (the sticky is changed), or both are kept on purpose.
+export interface ResolveHandler extends EventHandler {
+  name: 'RESOLVE'
+  handler: (id: string, key: string, side: 'map' | 'github' | 'keep') => void
+}
 export interface ResizeWindowHandler extends EventHandler {
   name: 'RESIZE_WINDOW'
   handler: (windowSize: { width: number; height: number }) => void

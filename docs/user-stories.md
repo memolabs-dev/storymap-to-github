@@ -12,7 +12,7 @@ Each story is checked in Figma on a copy of a board, against a test repository. 
 | 4 | set the size of an issue from the board | I keep my estimates where I plan | Done: the card of a linked sticky sets the size on the project board (its Size field), or clears it, when the plugin may write |
 | 5 | see where the work stands: sprint, status, who is on it | I can answer "where are we?" without opening GitHub | Done, read only |
 | 6 | know where the map and GitHub disagree, and who changed what | the weekly starts from facts | Done: Differences and "Why?" |
-| 7 | rename the issue when the map is right | titles stay in the words of the map | Not started (resolving differences) |
+| 7 | rename the issue when the map is right | titles stay in the words of the map | Done: each difference offers "the map is right" (rename the issue, set its milestone, move it under its parent), "Rename the sticky" for a title, and "Keep both", which hides it until either side changes |
 | 8 | not change the tech lead's fields by mistake | each role keeps its fields | Not started (roles) |
 | 9 | publish a batch of stickies after reviewing them | a new release becomes issues in one go | Not started |
 | 10 | see what moved since last week | the weekly is quick | Not started |

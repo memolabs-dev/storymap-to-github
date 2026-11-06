@@ -432,3 +432,29 @@ test('a project page gives the size field, its options and each card, so sizes c
   assert.equal(p.itemIds['acme/library#19'], 'PVTI_0');
   assert.equal(core.readProject([projectPage]).sizeField, null, 'a board without a size field has none');
 });
+
+test('each difference says what the map wants, and one kept on purpose stays away until it changes', () => {
+  const b = core.buildBacklog(board(), legend);
+  const id = (title) => find(b, title).id;
+  const issue = (number, title, extra = {}) => ({ number, title, html_url: `u${number}`, state: 'open', state_reason: null, milestone: null, parent: null, ...extra });
+  const issues = [
+    issue(11, 'Épopée : Catalogue'),
+    issue(12, 'Épopée : Borrowing'),
+    issue(19, 'Back-office for staff', { milestone: 'P0 · MVP', parent: 11 }),
+    issue(3, 'Import books from a spreadsheet', { milestone: 'P0 · MVP', parent: 11 }),
+    issue(20, 'Reservation calendar', { milestone: 'P0 · MVP', parent: 11 }),
+  ];
+  const links = { [id('Back-office')]: 19, [id('Import books from a spreadsheet')]: 3, [id('Reservation calendar')]: 20 };
+  const matches = core.matchIssues(b, issues, links);
+  const all = core.findDrift(b, issues, matches).drifts;
+  const of = (kind) => all.find((x) => x.kind === kind);
+  assert.equal(of('title').target, 'Back-office');
+  assert.equal(of('milestone').target, 'P1');
+  assert.equal(of('parent').target, 12, 'the map puts it under Borrowing, #12');
+
+  const kept = { [of('title').id]: [core.driftKey(of('title'))] };
+  const after = core.findDrift(b, issues, matches, kept).drifts;
+  assert.ok(!after.some((x) => x.kind === 'title'), 'kept on purpose');
+  const renamedAgain = issues.map((i) => (i.number === 19 ? { ...i, title: 'Back-office v2' } : i));
+  assert.ok(core.findDrift(b, renamedAgain, matches, kept).drifts.some((x) => x.kind === 'title'), 'back when GitHub changes again');
+});

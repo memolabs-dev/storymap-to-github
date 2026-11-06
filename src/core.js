@@ -477,7 +477,13 @@ function sameRelease(a, b) {
 
 // issues: [{ number, title, html_url, state, state_reason, milestone, parent }]
 // Returns { drifts: [{ id, title, kind, number, url, board, github }], onlyOnGitHub, onlyOnBoard, toConfirm }
-function findDrift(backlog, issues, matches) {
+// What identifies one difference: when either side changes, it is a new one.
+const driftKey = (d) => `${d.kind}|${d.number}|${d.board}|${d.github}`;
+
+// kept: { [stickyId]: [driftKey] } differences the team keeps on purpose.
+// Each difference carries `target`, what the map wants: the sticky's title,
+// its release, or the number of the issue it should sit under.
+function findDrift(backlog, issues, matches, kept = {}) {
   const byNumber = new Map(issues.map((i) => [i.number, i]));
   const linked = (item) => {
     const m = matches[item.id];
@@ -508,7 +514,7 @@ function findDrift(backlog, issues, matches) {
     if (issue.state === 'closed' && (issue.state_reason === 'not_planned' || issue.state_reason === 'duplicate')) {
       drifts.push({ ...base, kind: 'dropped', board: 'Still on the map', github: issue.state_reason === 'duplicate' ? 'Closed as duplicate' : 'Closed as not planned' });
     }
-    if (normalize(item.title) !== normalize(issue.title)) drifts.push({ ...base, kind: 'title', board: item.title, github: issue.title });
+    if (normalize(item.title) !== normalize(issue.title)) drifts.push({ ...base, kind: 'title', board: item.title, github: issue.title, target: item.title });
     // Planned too late: the sprint ends after the due date of the release
     // the map puts the task in.
     const due = kind === 'task' && item.release ? dueOf(item.release) : null;
@@ -516,7 +522,7 @@ function findDrift(backlog, issues, matches) {
       drifts.push({ ...base, kind: 'schedule', board: `${item.release}, due ${due.date}`, github: `${issue.sprint.title}, ends ${issue.sprint.end}` });
     }
     if (kind === 'task' && !sameRelease(item.release, issue.milestone)) {
-      drifts.push({ ...base, kind: 'milestone', board: item.release || 'No release row', github: issue.milestone || 'No milestone' });
+      drifts.push({ ...base, kind: 'milestone', board: item.release || 'No release row', github: issue.milestone || 'No milestone', target: item.release || null });
     }
     const expected = ancestors.map(linked).filter(Boolean);
     if (expected.length && !expected.some((p) => p.number === issue.parent)) {
@@ -526,6 +532,7 @@ function findDrift(backlog, issues, matches) {
         kind: 'parent',
         board: `Under ${expected.map((p) => `#${p.number}`).join(' or ')}`,
         github: parent ? `Under #${parent.number} ${parent.title}` : issue.parent ? `Under #${issue.parent}` : 'No parent issue',
+        target: expected[0].number,
       });
     }
   };
@@ -554,7 +561,8 @@ function findDrift(backlog, issues, matches) {
   const onlyOnGitHub = issues
     .filter((i) => i.state === 'open' && !used.has(i.number))
     .map((i) => ({ number: i.number, title: i.title, url: i.html_url, milestone: i.milestone }));
-  return { drifts, onlyOnGitHub, onlyOnBoard, toConfirm };
+  const open = drifts.filter((d) => !(kept[d.id] || []).includes(driftKey(d)));
+  return { drifts: open, onlyOnGitHub, onlyOnBoard, toConfirm };
 }
 
 // The "why" of a drift, read from the issue's history on GitHub.
@@ -814,6 +822,7 @@ function draftIssue(id, backlog, matches, repo, publishing) {
 
 export {
   DEFAULT_BODY,
+  driftKey,
   draftIssue,
   TYPES, LEGEND_PATTERN, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows,
   buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl,

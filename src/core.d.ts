@@ -130,6 +130,8 @@ export interface Drift {
   url?: string
   board: string
   github: string
+  // What the map wants: the sticky's title, its release, or its parent's number.
+  target?: string | number | null
 }
 
 export interface DriftReport {
@@ -208,7 +210,8 @@ export declare function similarity(a: string, b: string, loose?: boolean): numbe
 export declare function matchIssues(backlog: Backlog, issues: Array<Issue>, links?: Record<string, number>): Matches
 export declare function allItems(backlog: Backlog): Array<{ item: MapNode & Partial<Task>; kind: 'epic' | 'feature' | 'task' }>
 export declare function sameRelease(a: string | null | undefined, b: string | null | undefined): boolean
-export declare function findDrift(backlog: Backlog, issues: Array<Issue>, matches: Matches): DriftReport
+export declare function driftKey(drift: Drift): string
+export declare function findDrift(backlog: Backlog, issues: Array<Issue>, matches: Matches, kept?: Record<string, Array<string>>): DriftReport
 export declare function explainEvents(events: Array<unknown>, kind: string): Array<string>
 export declare function parseProjectUrl(url: string): { kind: 'organization' | 'user'; owner: string; number: number } | null
 export declare function projectQuery(kind: 'organization' | 'user'): string
