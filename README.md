@@ -63,6 +63,10 @@ npm run watch
 
 Works end to end on a copy of a real board and a test repository: reading, linking, creating issues, settling differences, the weekly view, roles and the starting template. Not yet published on Figma Community, so for now each person adds it as a development plugin. Dark theme not checked yet.
 
+## Contact
+
+Memo Labs, contact@memolabs.dev. On Figma: https://www.figma.com/@memolabs
+
 ## License
 
 MIT

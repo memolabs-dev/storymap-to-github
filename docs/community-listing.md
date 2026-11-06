@@ -40,13 +40,14 @@ Restricted, as declared in the manifest:
 - `https://api.github.com`: reads the repository and project board, and writes what you confirm.
 - `https://storymap-auth.storymap-authmemolabsworkersdev.workers.dev`: forwards GitHub's sign-in, which refuses calls from a plugin window. It keeps nothing.
 
-## Support contact
+## Publisher and support contact
 
-[SUPPORT CONTACT]
+- Published by Memo Labs, from the Figma profile https://www.figma.com/@memolabs
+- Support contact: contact@memolabs.dev
 
 ## Before pressing Publish
 
-- Two-factor authentication is on for the Figma account that publishes.
+- Two-factor authentication is on for the Figma account that publishes as @memolabs.
 - The plugin is created in Figma (Plugins › Development › New plugin…, or at publish time), and the id Figma gives replaces `storymap-to-github-dev` in `package.json`, then `npm run build`.
 - The guide and privacy pages are public: the repository is public since 6 November 2026.
-- The support contact is filled in, here and in `docs/privacy.md`.
+- contact@memolabs.dev receives mail.

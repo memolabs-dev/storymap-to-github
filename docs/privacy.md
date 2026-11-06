@@ -29,4 +29,4 @@ Storymap to GitHub is not made, endorsed or supported by GitHub or Figma.
 
 ## Contact
 
-[SUPPORT CONTACT: an email address or a link]
+Storymap to GitHub is made by Memo Labs. Questions about this page, or a request about your data: contact@memolabs.dev
