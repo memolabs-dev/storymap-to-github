@@ -12,6 +12,7 @@ import {
   IconRefresh16,
   SearchTextbox,
   SegmentedControl,
+  TextboxMultiline,
   Tabs,
   Textbox,
   Toggle,
@@ -22,7 +23,7 @@ import { emit, on } from '@create-figma-plugin/utilities'
 import { Fragment, h } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 
-import { draftIssue, normalize, suggestIssues } from './core'
+import { DEFAULT_BODY, draftIssue, normalize, suggestIssues } from './core'
 import type { Drift, Feature, ItemType, MapNode, Task } from './core'
 import type {
   AuthHandler,
@@ -258,6 +259,8 @@ function Plugin() {
   // The title typed in the publish preview, and the sticky last published
   // from its card, to show how it went there.
   const [draftTitle, setDraftTitle] = useState('')
+  const [draftBody, setDraftBody] = useState('')
+  const [bodyTemplate, setBodyTemplate] = useState<string | null>(null)
   const [publishedFrom, setPublishedFrom] = useState<string | null>(null)
   const [auth, setAuth] = useState<AuthPayload>({ state: 'idle' })
   const [repos, setRepos] = useState<Array<RepoChoice> | null>(null)
@@ -294,6 +297,7 @@ function Plugin() {
         setSelected(id)
         setSearch('')
         setDraftTitle('')
+        setDraftBody('')
         if (id) setTab('Map')
       }),
     ]
@@ -309,6 +313,7 @@ function Plugin() {
     setSelected(id)
     setSearch('')
     setDraftTitle('')
+    setDraftBody('')
     focus(id, true)
   }
 
@@ -466,6 +471,7 @@ function Plugin() {
     if (!draft) return null
     const busy = status !== null && status.state === 'loading'
     const title = draftTitle || draft.title
+    const text = draftBody || draft.body
     const lines: Array<[string, string]> = [
       ['Type', draft.type ? draft.type : `label "${draft.kind}" (no ${KIND_LABEL[draft.kind]} type here)`],
       ['Parent', draft.parent ? (draft.parent.number ? `#${draft.parent.number} ${draft.parent.title}` : `${draft.parent.title}, not on GitHub yet`) : 'None'],
@@ -478,6 +484,8 @@ function Plugin() {
         <p class={styles.question}>Not yet? Create its issue in {repoName}</p>
         <span class={styles.fieldLabel}>Title</span>
         <Textbox value={title} onValueInput={setDraftTitle} spellCheck={false} />
+        <span class={styles.fieldLabel} style={{ marginTop: 8 }}>Story and acceptance criteria</span>
+        <TextboxMultiline value={text} onValueInput={setDraftBody} rows={9} grow spellCheck />
         <dl class={styles.draft}>
           {lines.map(([k, v]) => (
             <Fragment key={k}>
@@ -495,7 +503,7 @@ function Plugin() {
               disabled={busy || !title.trim()}
               onClick={() => {
                 setPublishedFrom(id)
-                emit<PublishHandler>('PUBLISH', id, title)
+                emit<PublishHandler>('PUBLISH', id, title, text)
               }}
             >
               Create the issue
@@ -898,7 +906,7 @@ function Plugin() {
   // new issue starts with, which each team sets to its own words.
   const writing = () => {
     const { repo: repoName, meta, publishing, writeAllowed } = board.settings
-    const save = (change: { startLabel?: string; startStatus?: string }) => emit<SetPublishingHandler>('SET_PUBLISHING', change)
+    const save = (change: { startLabel?: string; startStatus?: string; bodyTemplate?: string }) => emit<SetPublishingHandler>('SET_PUBLISHING', change)
     return (
       <div class={styles.publish}>
         <span class={styles.stepTitle}>4. What the plugin may do in {repoName}</span>
@@ -930,6 +938,19 @@ function Plugin() {
             onBlur={() => startStatus !== null && save({ startStatus: startStatus.trim() })}
             spellCheck={false}
           />
+        </div>
+        <div class={styles.field}>
+          <span class={styles.fieldLabel}>Text of a new issue. {'{title}'}, {'{parent}'}, {'{release}'} and {'{steps}'} are filled in.</span>
+          <TextboxMultiline
+            value={bodyTemplate === null ? publishing.bodyTemplate || DEFAULT_BODY : bodyTemplate}
+            onValueInput={setBodyTemplate}
+            onBlur={() => bodyTemplate !== null && save({ bodyTemplate: bodyTemplate.trim() === DEFAULT_BODY ? '' : bodyTemplate })}
+            rows={8}
+            grow
+          />
+          {publishing.bodyTemplate ? (
+            <button class={styles.linkButton} onClick={() => { setBodyTemplate(null); save({ bodyTemplate: '' }) }}>Back to the default text</button>
+          ) : null}
         </div>
         </details>
       </div>

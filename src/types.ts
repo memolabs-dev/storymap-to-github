@@ -191,7 +191,7 @@ export interface SetPublishingHandler extends EventHandler {
 }
 export interface PublishHandler extends EventHandler {
   name: 'PUBLISH'
-  handler: (id: string, title: string) => void
+  handler: (id: string, title: string, body: string) => void
 }
 export interface ResizeWindowHandler extends EventHandler {
   name: 'RESIZE_WINDOW'

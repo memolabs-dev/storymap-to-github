@@ -725,6 +725,40 @@ function parentsOf(backlog) {
 }
 
 const TYPE_NAMES = { epic: 'Epic', feature: 'Feature', task: 'Task' };
+
+// The text a new issue starts with: a user story to complete, then where the
+// sticky sits on the map. Each team can set its own, per repository.
+// Placeholders: {title}, {parent}, {release}, {steps} (a checklist).
+const DEFAULT_BODY = [
+  '**As a** …',
+  '**I want** {title}',
+  '**So that** …',
+  '',
+  '### Acceptance criteria',
+  '- [ ] …',
+  '{steps}',
+  '',
+  '---',
+  'From the story map in FigJam.',
+  'Part of: {parent}',
+  'Release on the map: {release}',
+].join('\n');
+
+// Fills the placeholders; a line that a placeholder left with nothing after
+// its label ("Release on the map: ") is dropped, and so is an empty {steps}.
+function fillTemplate(template, values) {
+  const lines = [];
+  for (const line of template.split('\n')) {
+    let empty = false;
+    const filled = line.replace(/\{(title|parent|release|steps)\}/g, (_, key) => {
+      if (!values[key]) empty = true;
+      return values[key] || '';
+    });
+    if (empty && (/:\s*$/.test(filled) || !filled.trim())) continue;
+    lines.push(filled);
+  }
+  return lines.join('\n').trim();
+}
 const isIssue = (m) => Boolean(m) && (m.status === 'linked' || m.status === 'exists');
 
 // The issue a sticky would become, shown to the team before anything is
@@ -755,15 +789,18 @@ function draftIssue(id, backlog, matches, repo, publishing) {
     else warnings.push(`No milestone on GitHub matches the release "${item.release}": the issue will have none.`);
   }
 
-  const lines = ['From the story map in FigJam.'];
-  if (parent) lines.push('', `Part of: ${parent.title}${parent.number ? ` (#${parent.number})` : ''}`);
-  if (item.release) lines.push(`Release on the map: ${item.release}`);
-  if (kind === 'feature' && item.steps && item.steps.length) lines.push('', 'Steps on the map:', ...item.steps.map((s) => `- [ ] ${s.title}`));
+  const body = fillTemplate(publishing.bodyTemplate || DEFAULT_BODY, {
+    title: item.title,
+    parent: parent ? `${parent.title}${parent.number ? ` (#${parent.number})` : ''}` : '',
+    release: item.release || '',
+    steps: kind === 'feature' && item.steps ? item.steps.map((s) => `- [ ] ${s.title}`).join('\n') : '',
+  });
 
-  return { id, kind, title: item.title, body: lines.join('\n'), type, labels, parent, milestone, status: publishing.startStatus || null, warnings };
+  return { id, kind, title: item.title, body, type, labels, parent, milestone, status: publishing.startStatus || null, warnings };
 }
 
 export {
+  DEFAULT_BODY,
   draftIssue,
   TYPES, LEGEND_PATTERN, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows,
   buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl,

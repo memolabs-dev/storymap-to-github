@@ -165,7 +165,11 @@ export interface RepoMeta {
 export interface Publishing {
   startLabel: string
   startStatus: string
+  // The text a new issue starts with; empty means the default user story.
+  bodyTemplate?: string
 }
+
+export declare const DEFAULT_BODY: string
 
 export interface IssueDraft {
   id: string

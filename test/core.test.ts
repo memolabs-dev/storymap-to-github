@@ -398,3 +398,23 @@ test('a feature body lists its steps, and a linked sticky has no draft', () => {
   const linked = core.matchIssues(b, [{ number: 7, title: 'Find a book' }]);
   assert.equal(core.draftIssue(feature.id, b, linked, repoMeta, publishing), null);
 });
+
+test('the issue text starts from a user story template with the sticky filled in', () => {
+  const b = core.buildBacklog(board(), legend);
+  const matches = core.matchIssues(b, [{ number: 7, title: 'Find a book' }]);
+  const task = find(b, 'Back-office');
+  const d = core.draftIssue(task.id, b, matches, repoMeta, publishing);
+  assert.match(d.body, /\*\*As a\*\*/);
+  assert.match(d.body, /\*\*I want\*\* Back-office/);
+  assert.match(d.body, /Acceptance criteria/);
+  assert.match(d.body, /Part of: Find a book \(#7\)/);
+  assert.match(d.body, /Release on the map: P0 · MVP/);
+});
+
+test('each team can set its own issue text, with placeholders', () => {
+  const b = core.buildBacklog(board(), legend);
+  const feature = find(b, 'Find a book');
+  const template = 'Story: {title}\nEpic: {parent}\nRelease: {release}\n{steps}';
+  const d = core.draftIssue(feature.id, b, core.matchIssues(b, []), repoMeta, { ...publishing, bodyTemplate: template });
+  assert.equal(d.body, 'Story: Find a book\nEpic: Catalogue\n- [ ] Search by title or author', 'a line left empty by a placeholder is dropped');
+});

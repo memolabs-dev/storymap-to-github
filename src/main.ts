@@ -83,7 +83,7 @@ interface State {
 
 // Generic starting values for a new issue; each team changes them in the
 // GitHub tab, per repository.
-const DEFAULT_PUBLISHING: Publishing = { startLabel: 'needs-refinement', startStatus: 'Backlog' }
+const DEFAULT_PUBLISHING: Publishing = { startLabel: 'needs-refinement', startStatus: 'Backlog', bodyTemplate: '' }
 
 const state: State = {
   items: [],
@@ -316,6 +316,20 @@ interface RawIssue {
   labels?: Array<{ name: string }>
 }
 
+const toIssue = (i: RawIssue): Issue => ({
+  number: i.number,
+  title: i.title,
+  html_url: i.html_url,
+  state: i.state,
+  state_reason: i.state_reason || null,
+  type: i.type ? i.type.name : null,
+  milestone: i.milestone ? i.milestone.title : null,
+  milestoneDue: i.milestone && i.milestone.due_on ? i.milestone.due_on.slice(0, 10) : null,
+  parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
+  assignees: (i.assignees || []).map((a) => a.login),
+  labels: (i.labels || []).map((l) => l.name),
+})
+
 async function fetchIssues(): Promise<Array<Issue>> {
   if (!/^[\w.-]+\/[\w.-]+$/.test(state.repo)) throw new Error('Enter the repository as owner/name.')
   const all: Array<Issue> = []
@@ -328,22 +342,7 @@ async function fetchIssues(): Promise<Array<Issue>> {
       throw new Error(`GitHub answered ${res.status}.`)
     }
     const batch = (await res.json()) as Array<RawIssue>
-    for (const i of batch) {
-      if (i.pull_request) continue
-      all.push({
-        number: i.number,
-        title: i.title,
-        html_url: i.html_url,
-        state: i.state,
-        state_reason: i.state_reason || null,
-        type: i.type ? i.type.name : null,
-        milestone: i.milestone ? i.milestone.title : null,
-        milestoneDue: i.milestone && i.milestone.due_on ? i.milestone.due_on.slice(0, 10) : null,
-        parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
-        assignees: (i.assignees || []).map((a) => a.login),
-        labels: (i.labels || []).map((l) => l.name),
-      })
-    }
+    for (const i of batch) if (!i.pull_request) all.push(toIssue(i))
     if (batch.length < 100) break
   }
   return all
@@ -433,7 +432,7 @@ async function addToProject(nodeId: string, status: string | null): Promise<stri
 // Publishes one sticky as an issue: the issue, its place under its parent,
 // the project board, then the link on the sticky. Only when the team allowed
 // writing to this repository.
-async function publishSticky(id: string, title: string) {
+async function publishSticky(id: string, title: string, text: string) {
   if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
   if (!state.token) throw new Error('Publishing needs a token that can write issues.')
   if (!state.backlog || !state.meta) throw new Error('Compare with GitHub first.')
@@ -446,7 +445,7 @@ async function publishSticky(id: string, title: string) {
     headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
       title: name,
-      body: draft.body,
+      body: text.trim() || draft.body,
       labels: draft.labels,
       ...(draft.milestone ? { milestone: draft.milestone.number } : {}),
       ...(draft.type ? { type: draft.type } : {}),
@@ -477,7 +476,13 @@ async function publishSticky(id: string, title: string) {
     }
   }
   // Read GitHub again, so the tree, the labels and drift show the new issue.
+  // GitHub's issue list can lag by a minute, so the new issue is added if
+  // the list does not have it yet: the card then shows it, not the form.
   await compare()
+  if (state.issues && !state.issues.some((i) => i.number === made.number)) {
+    state.issues.push({ ...toIssue(made), parent: draft.parent ? draft.parent.number : null, status: draft.status || undefined })
+    publish()
+  }
   emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? `${note} But ${problems.join(', ')}.` : note })
 }
 
@@ -881,8 +886,8 @@ export default function () {
     void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
   })
 
-  on<PublishHandler>('PUBLISH', (id, title) => {
-    void publishSticky(id, title).catch(fail)
+  on<PublishHandler>('PUBLISH', (id, title, body) => {
+    void publishSticky(id, title, body).catch(fail)
   })
 
   on<ResizeWindowHandler>('RESIZE_WINDOW', ({ width, height }) => figma.ui.resize(width, height))
