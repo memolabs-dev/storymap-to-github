@@ -188,8 +188,10 @@ async function moveOldLinks() {
 async function loadSettings() {
   const saved = ((await figma.clientStorage.getAsync('legend')) || {}) as Record<string, ItemType>
   state.legend = { ...defaultLegend(state.palette), ...saved }
-  state.repo = (await figma.clientStorage.getAsync('repo')) || ''
-  state.project = (await figma.clientStorage.getAsync('project')) || ''
+  // Each board has its own repository and project board, so opening one
+  // file never reads, or writes to, the repository of another.
+  state.repo = (await figma.clientStorage.getAsync(fileKey('repo'))) || ''
+  state.project = (await figma.clientStorage.getAsync(fileKey('project'))) || ''
   state.token = (await figma.clientStorage.getAsync('token')) || ''
   await moveOldLinks()
   readLinks()
@@ -642,8 +644,8 @@ export default function () {
       state.repo = repo.trim()
       state.project = project.trim()
       if (token) state.token = token.trim()
-      await figma.clientStorage.setAsync('repo', state.repo)
-      await figma.clientStorage.setAsync('project', state.project)
+      await figma.clientStorage.setAsync(fileKey('repo'), state.repo)
+      await figma.clientStorage.setAsync(fileKey('project'), state.project)
       if (token) await figma.clientStorage.setAsync('token', state.token)
       readLinks()
       await loadRepoSettings()

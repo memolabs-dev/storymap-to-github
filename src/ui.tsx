@@ -708,7 +708,11 @@ function Plugin() {
         </Button>
         {board.settings.hasToken ? <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Forget token</Button> : null}
       </div>
-      {board.settings.repo && board.settings.meta ? writing() : null}
+      {board.settings.repo && board.settings.meta && repo.trim().toLowerCase() === board.settings.repo.toLowerCase() ? (
+        writing()
+      ) : board.settings.repo && repo.trim() ? (
+        <p class={styles.help}>Press Compare to connect {repo.trim()} before allowing changes to it.</p>
+      ) : null}
     </Fragment>
   )
 
