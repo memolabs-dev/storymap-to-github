@@ -1,3 +1,5 @@
+<img src="brand/icon.svg" width="72" height="72" alt="">
+
 # Storymap to GitHub
 
 A FigJam plugin for teams that plan in a story map and build in GitHub. It reads the map as the backlog it is, or will become: epics, features with their steps, tasks, releases. Then it keeps the two in step, from the board: create the issues, see where the map and GitHub disagree, settle it in one click, and see what moved this week.
@@ -40,6 +42,10 @@ node scripts/check-sandbox.mjs owner/repo https://github.com/orgs/owner/projects
 ```
 
 Mentions in the copied issues are broken so nobody is notified. If the copy's organization has no Epic issue type, epics get an `epic` label instead.
+
+## Brand
+
+The icon, the Figma Community cover, the colours and the fonts are in [brand/](brand/README.md).
 
 ## Develop
 

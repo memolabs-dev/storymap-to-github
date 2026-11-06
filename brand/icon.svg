@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Storymap to GitHub">
+  <!-- A sticky and the issue label the plugin puts in its corner. -->
+  <rect width="128" height="128" rx="28" fill="#1b1f24"/>
+  <g transform="rotate(-6 64 58)">
+    <path d="M28 22h70v54L80 94H28z" fill="#f5c33b"/>
+    <path d="M98 76H80v18z" fill="#c9971c"/>
+  </g>
+  <rect x="46" y="84" width="62" height="26" rx="13" fill="#ffffff" stroke="#1b1f24" stroke-width="4"/>
+  <circle cx="60" cy="97" r="5.5" fill="#1a7f37"/>
+  <rect x="71" y="94" width="26" height="6" rx="3" fill="#1b1f24"/>
+</svg>

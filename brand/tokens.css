@@ -1,0 +1,18 @@
+/* Storymap to GitHub: the colours and type of the brand.
+   The kind colours are the ones the plugin gives epics, features and tasks. */
+:root {
+  --sm-ink: #1b1f24;        /* text, the icon's ground */
+  --sm-muted: #59616b;      /* secondary text, 4.5:1 on canvas and white */
+  --sm-canvas: #f4f5f7;     /* page ground, like the FigJam canvas */
+  --sm-rule: #dfe2e7;
+  --sm-linked: #1a7f37;     /* linked to GitHub, and actions only */
+  --sm-epic: #f5c33b;       /* the sticky */
+  --sm-epic-fold: #c9971c;
+  --sm-feature: #4ba3f7;
+  --sm-task: #a77bf3;
+  --sm-note: #f07fb5;
+
+  --sm-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif; /* 800 for the name */
+  --sm-body: "Atkinson Hyperlegible", system-ui, -apple-system, sans-serif;
+  --sm-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;  /* issue labels */
+}
