@@ -15,7 +15,7 @@ Run `bash brand/render.sh` after changing `icon.svg` or `cover.html`. It draws t
 
 - Ink `#1B1F24`: text, and the ground of the icon.
 - Canvas `#F4F5F7`: page ground, like the FigJam canvas.
-- Linked `#1A7F37`: "linked to GitHub", and actions. Nothing else is green.
+- Linked `#1A7F37`: a sticky linked to GitHub, and actions. Nothing else is green.
 - The kinds, as in the plugin: epic `#F5C33B` (the sticky), feature `#4BA3F7`, task `#A77BF3`, note `#F07FB5`.
 
 ## Type
