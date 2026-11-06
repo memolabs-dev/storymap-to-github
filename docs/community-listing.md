@@ -26,7 +26,7 @@ Nothing is written to GitHub until you click, and only in repositories where you
 
 **You need a GitHub account** that can see the repository, and write access to create issues. Signing in goes through GitHub's device flow: a short code, a click on GitHub. Your organization may have to approve the app.
 
-Guide: [GUIDE LINK]. Privacy: [PRIVACY LINK].
+Guide: https://github.com/memolabs-dev/storymap-to-github/blob/main/docs/guide.md. Privacy: https://github.com/memolabs-dev/storymap-to-github/blob/main/docs/privacy.md.
 
 Not made, endorsed or supported by GitHub.
 
@@ -48,5 +48,5 @@ Restricted, as declared in the manifest:
 
 - Two-factor authentication is on for the Figma account that publishes.
 - The plugin is created in Figma (Plugins › Development › New plugin…, or at publish time), and the id Figma gives replaces `storymap-to-github-dev` in `package.json`, then `npm run build`.
-- The guide and privacy pages are reachable by people outside the team: the repository is private, so they need a public home.
+- The guide and privacy pages are public: the repository is public since 6 November 2026.
 - The support contact is filled in, here and in `docs/privacy.md`.
