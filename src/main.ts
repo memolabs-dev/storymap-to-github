@@ -21,16 +21,20 @@ import {
   findDrift,
   labelText,
   matchIssues,
+  parseIssueTemplate,
   parseProjectUrl,
+  pickTemplate,
   projectQuery,
   readProject,
   toMarkdown,
 } from './core'
 import { getLang, plural, resolveLang, setLang, t } from './i18n'
 import type { LangSetting } from './i18n'
-import type { Action, Backlog, BoardItem, Role, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
+import type { Action, Backlog, BoardItem, Role, Issue, IssueTemplate, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
 import type {
   AddTemplateHandler,
+  ConvertDraftHandler,
+  UnlinkDraftHandler,
   SetOwnerHandler,
   SetRoleHandler,
   AuthHandler,
@@ -83,6 +87,9 @@ interface State {
   matches: Matches
   issues: Array<Issue> | null
   links: Record<string, number>
+  // Stickies made into a draft on the project board: its item, and the
+  // template it started from.
+  drafts: Record<string, DraftLink>
   repo: string
   project: string
   token: string
@@ -118,6 +125,7 @@ const state: State = {
   matches: {},
   issues: null,
   links: {},
+  drafts: {},
   repo: '',
   project: '',
   token: '',
@@ -226,13 +234,86 @@ function readBoard() {
 // or 0 for "not on GitHub yet".
 const linkKey = () => `link:${state.repo.toLowerCase()}`
 
+const draftKey = () => `draft:${state.repo.toLowerCase()}`
+
+// A sticky's draft: its item on the project board (and which board), and the
+// template it started from.
+interface DraftLink {
+  item: string
+  template: string
+  project?: string
+}
+
 function readLinks() {
   state.links = {}
+  state.drafts = {}
   if (!state.repo) return
   for (const [id, node] of stickies) {
     const value = node.getPluginData(linkKey())
     if (value !== '') state.links[id] = Number(value)
+    const draft = node.getPluginData(draftKey())
+    if (draft) {
+      try {
+        state.drafts[id] = JSON.parse(draft) as DraftLink
+      } catch {
+        // A damaged value is dropped; the draft stays on the board.
+      }
+    }
   }
+}
+
+function writeDraft(id: string, draft: DraftLink | null) {
+  const node = stickies.get(id)
+  if (!node || !state.repo) return
+  node.setPluginData(draftKey(), draft ? JSON.stringify(draft) : '')
+  if (draft) state.drafts[id] = draft
+  else delete state.drafts[id]
+}
+
+// A draft converted on GitHub keeps its board item, which now holds the
+// issue: the sticky is linked to it. A draft deleted from the board is
+// forgotten. Only when the board was read.
+// Drafts of another board are left alone. An item the read did not show (a
+// board cut at 2,000 items, an archived draft) is asked for by its id, and
+// forgotten only when GitHub says it is gone.
+async function reconcileDrafts() {
+  const board = state.board
+  if (!board) return
+  const prefix = `${state.repo}#`.toLowerCase()
+  const seen = new Set<string>()
+  for (const [id, d] of Object.entries(state.drafts)) {
+    if (d.project && board.id && d.project !== board.id) continue
+    // A duplicated sticky carries the same draft: the first one keeps it.
+    if (seen.has(d.item)) {
+      writeDraft(id, null)
+      continue
+    }
+    seen.add(d.item)
+    if (board.drafts[d.item]) continue
+    let key = Object.keys(board.itemIds).find((k) => board.itemIds[k] === d.item) || null
+    if (!key) {
+      try {
+        const found = await graphql<{ node: { content: { __typename: string; number?: number; repository?: { nameWithOwner: string } } | null } | null }>(
+          'query($id: ID!) { node(id: $id) { ... on ProjectV2Item { content { __typename ... on Issue { number repository { nameWithOwner } } } } } }',
+          { id: d.item },
+        )
+        if (found.node && found.node.content && found.node.content.__typename === 'DraftIssue') continue
+        if (found.node && found.node.content && found.node.content.number && found.node.content.repository) {
+          key = `${found.node.content.repository.nameWithOwner}#${found.node.content.number}`.toLowerCase()
+        }
+      } catch {
+        // Not sure it is gone: keep the link.
+        continue
+      }
+    }
+    if (key && key.startsWith(prefix)) writeLink(id, Number(key.slice(prefix.length)))
+    writeDraft(id, null)
+  }
+}
+
+// Forgets the draft on every other sticky that carries the same item.
+function dropCopies(item: string, keep: string) {
+  for (const [id, d] of Object.entries(state.drafts)) if (id !== keep && d.item === item) writeDraft(id, null)
 }
 
 function writeLink(id: string, number: number | null) {
@@ -487,6 +568,12 @@ function publish() {
     guide: state.guide,
     week: readWeek(),
     readAt: state.readAt,
+    drafts: Object.fromEntries(
+      Object.entries(state.drafts).map(([id, d]) => {
+        const onBoard = state.board ? state.board.drafts[d.item] : null
+        return [id, { title: onBoard ? onBoard.title : '', status: onBoard && onBoard.status ? onBoard.status : null }]
+      }),
+    ),
     settings: {
       repo: state.repo,
       project: state.project,
@@ -501,12 +588,18 @@ function publish() {
       sizeOptions: state.board && state.board.sizeField ? state.board.sizeField.options.map((o) => o.name) : null,
       statusOptions: state.board ? state.board.statusOptions : null,
       publishing: state.publishing,
+      // The template a new issue starts from: the team's own text when it
+      // wrote one, else the repository's story template, else the plugin's.
+      defaultTemplate: defaultTemplate(),
       lang: getLang(),
       langSetting: state.langSetting,
     },
   })
   void syncLabels()
 }
+
+const defaultTemplate = () => (state.publishing.bodyTemplate || !state.meta ? '' : pickTemplate(state.meta.templates) || '')
+const templateOf = (file: string): IssueTemplate | null => (file && state.meta && (state.meta.templates || []).find((x) => x.file === file)) || null
 
 // GitHub ------------------------------------------------------------------
 
@@ -596,13 +689,27 @@ async function fetchMeta(): Promise<RepoMeta & { canPush: boolean }> {
     const res = await fetch(`https://api.github.com/${path}`, { headers: githubHeaders() })
     return res.ok ? res.json() : null
   }
-  const [repo, milestones, types] = await Promise.all([
+  const [repo, milestones, types, files] = await Promise.all([
     get(`repos/${state.repo}`),
     get(`repos/${state.repo}/milestones?state=all&per_page=100`),
     get(`orgs/${owner}/issue-types`),
+    get(`repos/${state.repo}/contents/.github/ISSUE_TEMPLATE`),
   ])
+  // The repository's issue templates, forms and Markdown, read as raw text.
+  const templates: Array<IssueTemplate> = []
+  for (const f of (Array.isArray(files) ? files : []) as Array<{ name: string; type: string }>) {
+    if (f.type !== 'file' || !/\.(ya?ml|md)$/i.test(f.name)) continue
+    const res = await fetch(`https://api.github.com/repos/${state.repo}/contents/.github/ISSUE_TEMPLATE/${encodeURIComponent(f.name)}`, {
+      headers: { ...githubHeaders(), Accept: 'application/vnd.github.raw' },
+    })
+    if (!res.ok) continue
+    const tpl = parseIssueTemplate(f.name, await res.text())
+    if (tpl) templates.push(tpl)
+  }
   return {
     canPush: Boolean(repo && repo.permissions && repo.permissions.push),
+    repoId: repo ? (repo.node_id as string) : null,
+    templates,
     milestones: ((milestones || []) as Array<{ title: string; number: number }>).map((m) => ({ title: m.title, number: m.number })),
     types: ((types || []) as Array<{ name: string }>).map((t) => t.name),
   }
@@ -623,26 +730,44 @@ async function graphql<T>(query: string, variables: Record<string, unknown>): Pr
 // board has that status; an empty status means the board's first one.
 // Returns what was done, for the message.
 async function addToProject(nodeId: string, status: string | null): Promise<string> {
-  const target = parseProjectUrl(state.project)
-  if (!target) return ''
-  const data = await graphql<{ owner: { projectV2: { id: string; field: { id: string; options: Array<{ id: string; name: string }> } | null } } }>(
-    `query($owner: String!, $number: Int!) { owner: ${target.kind}(login: $owner) { projectV2(number: $number) { id field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } } } } }`,
-    { owner: target.owner, number: target.number },
-  )
-  const project = data.owner.projectV2
+  const project = await projectWithStatus()
+  if (!project) return ''
   const added = await graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
     'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }',
     { project: project.id, content: nodeId },
   )
+  return (await setStatus(project, added.addProjectV2ItemById.item.id, status)).note
+}
+
+// The project board's id and its Status field.
+async function projectWithStatus(): Promise<{ id: string; field: { id: string; options: Array<{ id: string; name: string }> } | null } | null> {
+  const target = parseProjectUrl(state.project)
+  if (!target) return null
+  const data = await graphql<{ owner: { projectV2: { id: string; field: { id: string; options: Array<{ id: string; name: string }> } | null } } }>(
+    `query($owner: String!, $number: Int!) { owner: ${target.kind}(login: $owner) { projectV2(number: $number) { id field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } } } } }`,
+    { owner: target.owner, number: target.number },
+  )
+  return data.owner.projectV2
+}
+
+// Puts a board item in a status; an empty status means the board's first.
+async function setStatus(
+  project: { id: string; field: { id: string; options: Array<{ id: string; name: string }> } | null },
+  itemId: string,
+  status: string | null,
+): Promise<{ note: string; status: string | null }> {
   const option = project.field && (status ? project.field.options.find((o) => o.name.toLowerCase() === status.toLowerCase()) : project.field.options[0])
   if (!project.field || !option) {
-    return status ? t('Added to the board, without status: it has no "{status}" status.', { status }) : t('Added to the board, without status: it has no Status field.')
+    return {
+      status: null,
+      note: status ? t('Added to the board, without status: it has no "{status}" status.', { status }) : t('Added to the board, without status: it has no Status field.'),
+    }
   }
   await graphql(
     'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
-    { project: project.id, item: added.addProjectV2ItemById.item.id, field: project.field.id, option: option.id },
+    { project: project.id, item: itemId, field: project.field.id, option: option.id },
   )
-  return t('Added to the board in {status}.', { status: option.name })
+  return { status: option.name, note: t('Added to the board in {status}.', { status: option.name }) }
 }
 
 // Sets the size of an issue on the project board, the product manager's
@@ -689,12 +814,13 @@ async function setSize(number: number, size: string | null) {
 // Publishes one sticky as an issue: the issue, its place under its parent,
 // the project board, then the link on the sticky. Only when the team allowed
 // writing to this repository.
-async function createIssue(id: string, title: string, text: string): Promise<{ issue: Issue; note: string; problems: Array<string> }> {
+async function createIssue(id: string, title: string, text: string, templateFile: string): Promise<{ issue: Issue; note: string; problems: Array<string> }> {
   mustBeAllowed('create')
   if (!state.writeAllowed) throw new Error(t('Changes to {repo} are not allowed. Turn them on in the GitHub tab.', { repo: state.repo }))
   if (!state.token) throw new Error(t('Publishing needs a token that can write issues.'))
   if (!state.backlog || !state.meta) throw new Error(t('Compare with GitHub first.'))
-  const draft = draftIssue(id, state.backlog, state.matches, state.meta, state.publishing)
+  if (state.drafts[id]) throw new Error(t('This sticky already has a draft on the board: convert it instead.'))
+  const draft = draftIssue(id, state.backlog, state.matches, state.meta, state.publishing, templateOf(templateFile))
   if (!draft) throw new Error(t('This sticky is already an issue.'))
   const name = title.trim() || draft.title
   emit<StatusHandler>('STATUS', { state: 'loading', text: t('Creating "{title}" in {repo}…', { title: name, repo: state.repo }) })
@@ -717,15 +843,7 @@ async function createIssue(id: string, title: string, text: string): Promise<{ i
   writeLink(id, made.number)
   let note = t('#{n} created.', { n: made.number })
   const problems: Array<string> = []
-  if (draft.parent && draft.parent.number) {
-    const sub = await fetch(`https://api.github.com/repos/${state.repo}/issues/${draft.parent.number}/sub_issues`, {
-      method: 'POST',
-      headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sub_issue_id: made.id }),
-    })
-    if (sub.ok) note += ` ${t('Sub-issue of #{n}.', { n: draft.parent.number })}`
-    else problems.push(t('not made a sub-issue of #{n} (GitHub answered {status})', { n: draft.parent.number, status: sub.status }))
-  }
+  if (draft.parent && draft.parent.number) note += await makeSubIssue(draft.parent.number, made.id, problems)
   if (state.project) {
     try {
       const added = await addToProject(made.node_id, draft.status)
@@ -742,6 +860,114 @@ async function createIssue(id: string, title: string, text: string): Promise<{ i
   return { issue, note, problems }
 }
 
+// Puts a new issue under its parent; returns the note, or adds the problem.
+async function makeSubIssue(parent: number, issueId: number, problems: Array<string>): Promise<string> {
+  const sub = await fetch(`https://api.github.com/repos/${state.repo}/issues/${parent}/sub_issues`, {
+    method: 'POST',
+    headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sub_issue_id: issueId }),
+  })
+  if (sub.ok) return ` ${t('Sub-issue of #{n}.', { n: parent })}`
+  problems.push(t('not made a sub-issue of #{n} (GitHub answered {status})', { n: parent, status: sub.status }))
+  return ''
+}
+
+// Makes a sticky a draft issue on the project board: a title and a text,
+// nothing in the repository yet. The product manager refines it there, then
+// converts it into an issue.
+async function createDraft(id: string, title: string, text: string, templateFile: string) {
+  mustBeAllowed('create')
+  if (!state.writeAllowed) throw new Error(t('Changes to {repo} are not allowed. Turn them on in the GitHub tab.', { repo: state.repo }))
+  if (!state.token) throw new Error(t('Publishing needs a token that can write issues.'))
+  if (!state.backlog || !state.meta) throw new Error(t('Compare with GitHub first.'))
+  const board = state.board
+  if (!board || !board.id) throw new Error(t('A draft lives on a project board: pick one in the GitHub tab.'))
+  if (state.drafts[id]) throw new Error(t('This sticky already has a draft on the board: convert it instead.'))
+  const draft = draftIssue(id, state.backlog, state.matches, state.meta, state.publishing, templateOf(templateFile))
+  if (!draft) throw new Error(t('This sticky is already an issue.'))
+  const name = title.trim() || draft.title
+  emit<StatusHandler>('STATUS', { state: 'loading', text: t('Adding the draft "{title}" to the board…', { title: name }) })
+  const made = await graphql<{ addProjectV2DraftIssue: { projectItem: { id: string } } }>(
+    'mutation($project: ID!, $title: String!, $body: String) { addProjectV2DraftIssue(input: { projectId: $project, title: $title, body: $body }) { projectItem { id } } }',
+    { project: board.id, title: name, body: text.trim() || draft.body },
+  )
+  const item = made.addProjectV2DraftIssue.projectItem.id
+  writeDraft(id, { item, template: templateFile, project: board.id })
+  board.drafts[item] = { title: name }
+  let note = t('Draft "{title}" added to the board.', { title: name })
+  let warn = false
+  try {
+    const project = await projectWithStatus()
+    if (project) {
+      const set = await setStatus(project, item, draft.status)
+      if (set.status) board.drafts[item].status = set.status
+      else {
+        warn = true
+        note += ` ${set.note}`
+      }
+    }
+  } catch (err) {
+    warn = true
+    note += ` ${t('Its status was not set ({error}).', { error: err instanceof Error ? err.message : String(err) })}`
+  }
+  publish()
+  emit<StatusHandler>('STATUS', { state: warn ? 'warn' : 'ok', text: note })
+}
+
+// Turns a sticky's draft into an issue of the repository, then gives it
+// what a draft cannot hold: labels, milestone, type, and its parent.
+async function convertDraft(id: string) {
+  mustBeAllowed('create')
+  if (!state.writeAllowed) throw new Error(t('Changes to {repo} are not allowed. Turn them on in the GitHub tab.', { repo: state.repo }))
+  const linked = state.drafts[id]
+  if (!linked) throw new Error(t('This sticky has no draft on the board.'))
+  if (!state.backlog || !state.meta || !state.meta.repoId) throw new Error(t('Compare with GitHub first.'))
+  const draft = draftIssue(id, state.backlog, state.matches, state.meta, state.publishing, templateOf(linked.template))
+  emit<StatusHandler>('STATUS', { state: 'loading', text: t('Converting the draft into an issue of {repo}…', { repo: state.repo }) })
+  const converted = await graphql<{ convertProjectV2DraftIssueItemToIssue: { item: { content: { number?: number } | null } } }>(
+    'mutation($item: ID!, $repo: ID!) { convertProjectV2DraftIssueItemToIssue(input: { itemId: $item, repositoryId: $repo }) { item { content { ... on Issue { number } } } } }',
+    { item: linked.item, repo: state.meta.repoId },
+  )
+  const number = converted.convertProjectV2DraftIssueItemToIssue.item.content && converted.convertProjectV2DraftIssueItemToIssue.item.content.number
+  if (!number) throw new Error(t('GitHub did not say which issue the draft became.'))
+  const status = state.board && state.board.drafts[linked.item] ? state.board.drafts[linked.item].status : undefined
+  if (state.board) {
+    delete state.board.drafts[linked.item]
+    state.board.itemIds[`${state.repo}#${number}`.toLowerCase()] = linked.item
+  }
+  writeDraft(id, null)
+  dropCopies(linked.item, id)
+  writeLink(id, number)
+  let note = t('#{n} created from the draft.', { n: number })
+  const problems: Array<string> = []
+  const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${number}`, {
+    method: 'PATCH',
+    headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      labels: draft ? draft.labels : [],
+      ...(draft && draft.milestone ? { milestone: draft.milestone.number } : {}),
+      ...(draft && draft.type ? { type: draft.type } : {}),
+    }),
+  })
+  let made: (RawIssue & { id: number }) | null = null
+  if (res.ok) made = (await res.json()) as RawIssue & { id: number }
+  else {
+    problems.push(t('its labels and milestone were not set (GitHub answered {status})', { status: res.status }))
+    // The issue exists all the same: read it, to put it under its parent.
+    const got = await fetch(`https://api.github.com/repos/${state.repo}/issues/${number}`, { headers: githubHeaders() })
+    if (got.ok) made = (await got.json()) as RawIssue & { id: number }
+  }
+  if (draft && draft.parent && draft.parent.number) {
+    if (made) note += await makeSubIssue(draft.parent.number, made.id, problems)
+    else problems.push(t('not made a sub-issue of #{n} (GitHub answered {status})', { n: draft.parent.number, status: res.status }))
+  }
+  const issue: Issue | null = made ? { ...toIssue(made), parent: draft && draft.parent ? draft.parent.number : null, status } : null
+  if (issue && state.issues) state.issues.push(issue)
+  publish()
+  await refreshAfter(issue ? [issue] : [])
+  emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? t('{note} But {problems}.', { note, problems: problems.join(', ') }) : note })
+}
+
 // Reads GitHub again after creating issues. GitHub's issue list can lag by
 // a minute, so the issues just created are kept if the list misses them.
 async function refreshAfter(created: Array<Issue>) {
@@ -753,8 +979,8 @@ async function refreshAfter(created: Array<Issue>) {
   }
 }
 
-async function publishSticky(id: string, title: string, text: string) {
-  const { issue, note, problems } = await createIssue(id, title, text)
+async function publishSticky(id: string, title: string, text: string, templateFile: string) {
+  const { issue, note, problems } = await createIssue(id, title, text, templateFile)
   await refreshAfter([issue])
   emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? t('{note} But {problems}.', { note, problems: problems.join(', ') }) : note })
 }
@@ -769,7 +995,7 @@ async function publishMany(ids: Array<string>) {
   try {
     for (const [n, id] of order.entries()) {
       emit<StatusHandler>('STATUS', { state: 'loading', text: t('Creating {n} of {total}…', { n: n + 1, total: order.length }) })
-      const result = await createIssue(id, '', '')
+      const result = await createIssue(id, '', '', defaultTemplate())
       created.push(result.issue)
       problems.push(...result.problems.map((p) => `#${result.issue.number} ${p}`))
     }
@@ -1037,6 +1263,7 @@ async function compare() {
       state.issues = withProject(state.issues, board)
       state.sprints = board.sprints
       state.board = board
+      await reconcileDrafts()
       note += ` ${t('Sprints read from "{board}" ({n}).', { board: board.title, n: board.sprints.length })}`
     } catch (err) {
       warn = true
@@ -1160,6 +1387,17 @@ export default function () {
 
   on<LinkHandler>('LINK', (id, number) => {
     writeLink(id, number)
+    if (number) writeDraft(id, null)
+    publish()
+  })
+
+  on<ConvertDraftHandler>('CONVERT_DRAFT', (id) => {
+    void convertDraft(id).catch(fail)
+  })
+
+  // Forgets the link to a draft; the draft stays on the board.
+  on<UnlinkDraftHandler>('UNLINK_DRAFT', (id) => {
+    writeDraft(id, null)
     publish()
   })
 
@@ -1243,8 +1481,8 @@ export default function () {
     void publishMany(ids).catch(fail)
   })
 
-  on<PublishHandler>('PUBLISH', (id, title, body) => {
-    void publishSticky(id, title, body).catch(fail)
+  on<PublishHandler>('PUBLISH', (id, title, body, templateFile, asDraft) => {
+    void (asDraft ? createDraft(id, title, body, templateFile) : publishSticky(id, title, body, templateFile)).catch(fail)
   })
 
   on<ResizeWindowHandler>('RESIZE_WINDOW', ({ width, height }) => figma.ui.resize(width, height))

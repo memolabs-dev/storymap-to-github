@@ -64,11 +64,21 @@ Cliquez sur un post-it du tableau, ou sur une ligne de l'arbre : sa fiche s'ouvr
 
 **Créer l'issue** la crée, en fait une sous-issue de son parent, l'ajoute au tableau de projet avec son statut de départ, et lie le post-it.
 
+**Le modèle du dépôt.** Quand le dépôt a des modèles d'issue dans `.github/ISSUE_TEMPLATE`, formulaires (`.yml`) ou Markdown (`.md`), la fiche part de son modèle de fonctionnalité ou de story, jamais de son modèle de bug. La story va dans le champ du besoin, une liste à cocher dans les critères d'acceptation, et les autres champs gardent leur titre, comme GitHub les écrirait. Les labels et le préfixe de titre du modèle suivent, et la place du post-it sur la carte s'ajoute à la fin. Le menu **Modèle** en choisit un autre, ou le texte du plugin. Une équipe qui a écrit son propre texte dans **Plus de réglages** le garde.
+
+**D'abord un brouillon.** Quand un tableau de projet est choisi, la fiche propose aussi **Brouillon sur le tableau** : un brouillon d'issue, avec un titre et un texte, seulement sur le tableau, dans son statut de départ. C'est le choix par défaut du product manager, qui peut y travailler la story avant qu'elle n'arrive dans le dépôt. Le post-it affiche **Brouillon** dans l'arbre.
+
+![Commencer par un brouillon, depuis le modèle Fonctionnalité du dépôt](../images/fr/template-draft.jpg)
+
+Quand il est prêt, **Convertir en issue** en fait une issue du dépôt, puis lui donne ce qu'un brouillon ne peut pas porter : son type, ses labels, son jalon et sa place sous son parent. Un brouillon converti sur GitHub même est lié au post-it à la relecture suivante. **Pas ce brouillon** oublie le lien et laisse le brouillon sur le tableau.
+
+![Le brouillon d'un post-it, prêt à devenir une issue](../images/fr/draft-card.jpg)
+
 **Taille.** Sur un post-it lié, la ligne **Taille** pose la taille de l'issue sur le tableau de projet, ou l'efface.
 
 ## Publier un lot
 
-Dans **Écarts**, ouvrez **Seulement sur la carte** : tous les post-its sans issue, chacun avec une case à cocher. Rien n'est coché au départ. **Cocher les nouveaux** coche tous ceux qui ne ressemblent à aucune issue existante ; ceux marqués `#19?` ressemblent à une issue qui existe, alors ouvrez leur fiche et liez-les plutôt. **Créer N issues** les crée en commençant par les parents : une nouvelle fonctionnalité arrive sous sa nouvelle épopée, une sous-tâche sous sa nouvelle tâche.
+Un lot crée toujours des issues. Dans **Écarts**, ouvrez **Seulement sur la carte** : tous les post-its sans issue, chacun avec une case à cocher. Rien n'est coché au départ. **Cocher les nouveaux** coche tous ceux qui ne ressemblent à aucune issue existante ; ceux marqués `#19?` ressemblent à une issue qui existe, alors ouvrez leur fiche et liez-les plutôt. **Créer N issues** les crée en commençant par les parents : une nouvelle fonctionnalité arrive sous sa nouvelle épopée, une sous-tâche sous sa nouvelle tâche.
 
 ## Les écarts
 
@@ -112,7 +122,7 @@ Dans **Plus de réglages**, onglet GitHub :
 - **Qui fait quoi**, pour toute l'équipe.
 - **Le label d'une nouvelle issue**, `needs-refinement` par défaut, vide pour aucun.
 - **Le statut d'une nouvelle issue** sur le tableau de projet ; vide, c'est le premier statut du tableau.
-- **Le texte d'une nouvelle issue**, où `{title}`, `{parent}`, `{release}` et `{steps}` sont remplis.
+- **Le texte d'une nouvelle issue**, où `{title}`, `{parent}`, `{release}` et `{steps}` sont remplis. Vide, c'est le modèle de story du dépôt s'il en a un, sinon la user story du plugin.
 
 ## Bon à savoir
 

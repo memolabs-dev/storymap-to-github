@@ -159,6 +159,8 @@ export interface ProjectBoard {
   // The options of the Status field, in the board's order.
   statusOptions: Array<string>
   itemIds: Record<string, string>
+  // Draft issues on the board, by item id.
+  drafts: Record<string, { title: string; sprint?: Sprint; status?: string; size?: string }>
 }
 
 export interface Suggestion {
@@ -176,7 +178,24 @@ export interface ReadingOptions {
 export interface RepoMeta {
   types: Array<string>
   milestones: Array<{ title: string; number: number }>
+  // The repository's issue templates, and its node id (to convert drafts).
+  templates?: Array<IssueTemplate>
+  repoId?: string | null
 }
+
+// An issue template of the repository, its text ready for fillTemplate.
+export interface IssueTemplate {
+  file: string
+  name: string
+  about: string
+  title: string
+  labels: Array<string>
+  body: string
+}
+
+export declare function parseIssueTemplate(file: string, text: string): IssueTemplate | null
+export declare function pickTemplate(templates: Array<IssueTemplate> | undefined): string | null
+export declare function fillTemplate(template: string, values: { title?: string; parent?: string; release?: string; steps?: string }): string
 
 export interface Publishing {
   startLabel: string
@@ -201,7 +220,7 @@ export interface IssueDraft {
   warnings: Array<string>
 }
 
-export declare function draftIssue(id: string, backlog: Backlog, matches: Matches, repo: RepoMeta, publishing: Publishing): IssueDraft | null
+export declare function draftIssue(id: string, backlog: Backlog, matches: Matches, repo: RepoMeta, publishing: Publishing, template?: IssueTemplate | null): IssueDraft | null
 export declare const TYPES: Array<ItemType>
 export declare const LEGEND_PATTERN: RegExp
 export declare function hexOf(c: RGB): string

@@ -54,6 +54,7 @@
 .pillActive { background: var(--figma-color-bg-selected); color: var(--figma-color-text-brand); }
 .pillWaiting { background: var(--figma-color-bg-secondary); color: var(--figma-color-text-secondary); }
 .pillClosed { background: var(--figma-color-bg-secondary); color: var(--figma-color-text-tertiary); text-decoration: line-through; }
+.pillDraft { background: transparent; color: var(--figma-color-text-secondary); border: 1px dashed var(--figma-color-border-strong, var(--figma-color-border)); line-height: 16px; }
 .pillMaybe { background: var(--figma-color-bg-warning-tertiary); color: var(--figma-color-text-warning); }
 .sectionTitle { color: var(--figma-color-text-secondary); font-weight: 600; margin: 16px 0 6px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
 

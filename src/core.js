@@ -1,6 +1,7 @@
 // Storymap to GitHub: the board reading logic, with no Figma API in it, so
 // it runs the same in the plugin and in node:test (see test/). Types are in
 // core.d.ts. Texts shown to people go through t() (see i18n.js).
+import { load as loadYaml } from 'js-yaml';
 import { getLang, t } from './i18n.js';
 
 const TYPES = ['epic', 'feature', 'step', 'task', 'note', 'ignore'];
@@ -639,7 +640,7 @@ function projectQuery(kind) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
-          content { ... on Issue { number repository { nameWithOwner } } }
+          content { ... on Issue { number repository { nameWithOwner } } ... on DraftIssue { id title } }
           fieldValues(first: 30) { nodes {
             ... on ProjectV2ItemFieldIterationValue { title startDate duration }
             ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
@@ -680,11 +681,13 @@ function readProject(pages) {
   const statusOptions = status ? status.options.map((o) => o.name) : [];
   const items = {};
   const itemIds = {};
+  // Draft issues live only on the board, by their item id; once converted,
+  // the same item holds the issue.
+  const drafts = {};
   for (const page of pages) {
     for (const node of page.items.nodes) {
-      const issue = node.content;
-      if (!issue || !issue.number) continue;
-      if (node.id) itemIds[`${issue.repository.nameWithOwner}#${issue.number}`.toLowerCase()] = node.id;
+      const content = node.content;
+      if (!content) continue;
       const entry = {};
       for (const v of node.fieldValues.nodes) {
         if (!v) continue;
@@ -692,10 +695,16 @@ function readProject(pages) {
         else if (v.name && v.field && /status|statut/i.test(v.field.name)) entry.status = v.name;
         else if (v.name && v.field && SIZE_FIELD.test(v.field.name)) entry.size = v.name;
       }
-      items[`${issue.repository.nameWithOwner}#${issue.number}`.toLowerCase()] = entry;
+      if (content.number) {
+        const key = `${content.repository.nameWithOwner}#${content.number}`.toLowerCase();
+        if (node.id) itemIds[key] = node.id;
+        items[key] = entry;
+      } else if (content.title !== undefined && node.id) {
+        drafts[node.id] = { title: content.title, ...entry };
+      }
     }
   }
-  return { id: pages[0].id || null, title: pages[0].title, sprints, items, sizeField, statusOptions, itemIds };
+  return { id: pages[0].id || null, title: pages[0].title, sprints, items, sizeField, statusOptions, itemIds, drafts };
 }
 
 // A Markdown draft of the backlog, to paste into an issue or a note.
@@ -780,35 +789,20 @@ const TYPE_NAMES = { epic: 'Epic', feature: 'Feature', task: 'Task' };
 // The text a new issue starts with: a user story to complete, then where the
 // sticky sits on the map. Each team can set its own, per repository.
 // Placeholders: {title}, {parent}, {release}, {steps} (a checklist).
+const STORY = {
+  en: ['**As a** …', '**I want** {title}', '**So that** …'],
+  fr: ['**En tant que** …', '**Je veux** {title}', '**Afin de** …'],
+};
+const CRITERIA = { en: '### Acceptance criteria', fr: "### Critères d'acceptation" };
+// Where the sticky sits on the map, at the end of every new issue.
+const FOOTER = {
+  en: ['---', 'From the story map in FigJam.', 'Part of: {parent}', 'Release on the map: {release}'].join('\n'),
+  fr: ['---', 'Depuis la story map dans FigJam.', 'Fait partie de\u00a0: {parent}', 'Release sur la carte\u00a0: {release}'].join('\n'),
+};
+const lang = () => (getLang() === 'fr' ? 'fr' : 'en');
 const DEFAULT_BODY = {
-  en: [
-    '**As a** …',
-    '**I want** {title}',
-    '**So that** …',
-    '',
-    '### Acceptance criteria',
-    '- [ ] …',
-    '{steps}',
-    '',
-    '---',
-    'From the story map in FigJam.',
-    'Part of: {parent}',
-    'Release on the map: {release}',
-  ].join('\n'),
-  fr: [
-    '**En tant que** …',
-    '**Je veux** {title}',
-    '**Afin de** …',
-    '',
-    "### Critères d'acceptation",
-    '- [ ] …',
-    '{steps}',
-    '',
-    '---',
-    'Depuis la story map dans FigJam.',
-    'Fait partie de\u00a0: {parent}',
-    'Release sur la carte\u00a0: {release}',
-  ].join('\n'),
+  en: [...STORY.en, '', CRITERIA.en, '- [ ] …', '{steps}', '', FOOTER.en].join('\n'),
+  fr: [...STORY.fr, '', CRITERIA.fr, '- [ ] …', '{steps}', '', FOOTER.fr].join('\n'),
 };
 
 // The default text, in the language the plugin shows.
@@ -816,9 +810,14 @@ const defaultBody = () => DEFAULT_BODY[getLang()] || DEFAULT_BODY.en;
 
 // Fills the placeholders; a line that a placeholder left with nothing after
 // its label ("Release on the map: ") is dropped, and so is an empty {steps}.
+// A repository template says {story} where the user story goes and {footer}
+// for where the sticky sits, both written in the language shown when filled.
+const STORY_LINE = { en: '**As a** …, **I want** {title}, **so that** …', fr: '**En tant que** …, **je veux** {title}, **afin de** …' };
+
 function fillTemplate(template, values) {
   const lines = [];
-  for (const line of template.split('\n')) {
+  const text = template.replace(/\{footer\}/g, FOOTER[lang()]).replace(/\{story\}/g, STORY_LINE[lang()]);
+  for (const line of text.split('\n')) {
     let empty = false;
     const filled = line.replace(/\{(title|parent|release|steps)\}/g, (_, key) => {
       if (!values[key]) empty = true;
@@ -829,20 +828,99 @@ function fillTemplate(template, values) {
   }
   return lines.join('\n').trim();
 }
+// The repository's issue templates, from .github/ISSUE_TEMPLATE: issue forms
+// (.yml) and Markdown files with a front matter (.md). Each becomes a text
+// with the plugin's placeholders: the story goes in the form's need field,
+// a checklist in its acceptance criteria, then where the sticky sits on the
+// map. config.yml, and a file that does not parse, give null.
+const NEED_FIELD = /need|besoin|story|user|want|summary|résumé|description|what|quoi|problem|probl/i;
+const CRITERIA_FIELD = /crit|accept/i;
+
+function asLabels(v) {
+  if (Array.isArray(v)) return v.map(String).map((x) => x.trim()).filter(Boolean);
+  if (typeof v === 'string') return v.split(',').map((x) => x.trim()).filter(Boolean);
+  return [];
+}
+
+function formBody(fields) {
+  const inputs = fields.filter((f) => f && (f.type === 'textarea' || f.type === 'input'));
+  const label = (f) => String((f.attributes && f.attributes.label) || f.id || '');
+  const need = inputs.find((f) => f.type === 'textarea' && (NEED_FIELD.test(label(f)) || NEED_FIELD.test(f.id || ''))) || inputs.find((f) => f.type === 'textarea');
+  const criteria = inputs.find((f) => f !== need && (CRITERIA_FIELD.test(label(f)) || CRITERIA_FIELD.test(f.id || '')));
+  const parts = [];
+  for (const f of fields) {
+    if (!f || !f.attributes || f.type === 'markdown') continue;
+    const a = f.attributes;
+    let value = '';
+    if (f === need) value = '{story}';
+    else if (f === criteria) value = '- [ ] …\n{steps}';
+    // A dropdown keeps the answer the form itself preselects, and none else.
+    else if (f.type === 'dropdown') {
+      const opts = Array.isArray(a.options) ? a.options : [];
+      const pick = Number.isInteger(a.default) ? opts[a.default] : undefined;
+      value = typeof pick === 'string' ? pick : '';
+    }
+    else if (f.type === 'checkboxes') value = (a.options || []).map((o) => `- [ ] ${typeof o === 'string' ? o : o.label}`).join('\n');
+    else if (a.value) value = String(a.value);
+    parts.push(`### ${label(f)}\n\n${value}`.trimEnd());
+  }
+  return parts.join('\n\n');
+}
+
+function parseIssueTemplate(file, text) {
+  if (/^config\.ya?ml$/i.test(file)) return null;
+  try {
+    if (/\.ya?ml$/i.test(file)) {
+      const form = loadYaml(text);
+      if (!form || typeof form !== 'object' || !Array.isArray(form.body) || !form.name) return null;
+      return {
+        file,
+        name: String(form.name),
+        about: String(form.description || ''),
+        title: String(form.title || ''),
+        labels: asLabels(form.labels),
+        body: `${formBody(form.body)}\n\n{footer}`,
+      };
+    }
+    const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
+    if (!m) return null;
+    const head = loadYaml(m[1]) || {};
+    if (!head.name) return null;
+    return {
+      file,
+      name: String(head.name),
+      about: String(head.about || ''),
+      title: String(head.title || ''),
+      labels: asLabels(head.labels),
+      body: `${m[2].trim()}\n\n{footer}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// The template a story map item starts from: the repository's feature or
+// story template, never its bug one. null means the plugin's own text.
+function pickTemplate(templates) {
+  const story = /feat|fonction|story|user|besoin|need|enhanc|amélior/i;
+  const hit = (templates || []).find((x) => x && !/bug/i.test(`${x.name} ${x.file}`) && story.test(`${x.name} ${x.file}`));
+  return hit ? hit.file : null;
+}
+
 const isIssue = (m) => Boolean(m) && (m.status === 'linked' || m.status === 'exists');
 
 // The issue a sticky would become, shown to the team before anything is
 // written. repo: { types: issue type names of the owner, milestones: [{ title,
 // number }] }. publishing: { startLabel, startStatus }, both may be empty.
 // Returns null for a sticky that already is an issue.
-function draftIssue(id, backlog, matches, repo, publishing) {
+function draftIssue(id, backlog, matches, repo, publishing, template = null) {
   const found = allItems(backlog).find((x) => x.item.id === id);
   if (!found || isIssue(matches[id])) return null;
   const { item, kind } = found;
   const warnings = [];
   const typeName = TYPE_NAMES[kind];
   const type = (repo.types || []).includes(typeName) ? typeName : null;
-  const labels = [...(type ? [] : [kind]), ...(publishing.startLabel ? [publishing.startLabel] : [])];
+  const labels = [...new Set([...(template ? template.labels : []), ...(type ? [] : [kind]), ...(publishing.startLabel ? [publishing.startLabel] : [])])];
 
   const up = parentsOf(backlog).get(id) || null;
   let parent = null;
@@ -859,14 +937,15 @@ function draftIssue(id, backlog, matches, repo, publishing) {
     else warnings.push(t('No milestone on GitHub matches the release "{release}": the issue will have none.', { release: item.release }));
   }
 
-  const body = fillTemplate(publishing.bodyTemplate || defaultBody(), {
+  const body = fillTemplate(template ? template.body : publishing.bodyTemplate || defaultBody(), {
     title: item.title,
     parent: parent ? `${parent.title}${parent.number ? ` (#${parent.number})` : ''}` : '',
     release: item.release || '',
     steps: kind === 'feature' && item.steps ? item.steps.map((s) => `- [ ] ${s.title}`).join('\n') : '',
   });
 
-  return { id, kind, title: item.title, body, type, labels, parent, milestone, status: publishing.startStatus || null, warnings };
+  const title = `${template && template.title ? template.title : ''}${item.title}`;
+  return { id, kind, title, body, type, labels, parent, milestone, status: publishing.startStatus || null, warnings };
 }
 
 // The order to publish a batch in: epics, then features, then tasks, a task
@@ -988,6 +1067,9 @@ export {
   publishOrder,
   driftKey,
   draftIssue,
+  fillTemplate,
+  parseIssueTemplate,
+  pickTemplate,
   TYPES, LEGEND_PATTERN, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows,
   buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl,
   projectQuery, readProject, toMarkdown, suggestIssues, labelText,

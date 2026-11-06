@@ -660,3 +660,125 @@ test('matchesStatus keeps a task by its column, closed, or not on GitHub yet', (
   assert.equal(core.matchesStatus(null, 'none'), true);
   assert.equal(core.matchesStatus(open, 'none'), false);
 });
+
+// The repository's own issue templates: issue forms (.yml) and Markdown (.md).
+const FEATURE_FORM = `name: Feature
+description: Something the app should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for writing this down.
+  - type: textarea
+    id: need
+    attributes:
+      label: The need
+      description: One user sentence.
+      placeholder: As a reader, I want to filter books.
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+  - type: input
+    id: area
+    attributes:
+      label: Files
+  - type: dropdown
+    id: level
+    attributes:
+      label: Level
+      options: ["to decide", "beginner"]
+  - type: checkboxes
+    id: ready
+    attributes:
+      label: Ready to take
+      options:
+        - label: "We know who it is for."
+        - label: "It fits in a day."
+`;
+const BUG_MD = `---
+name: Bug report
+about: Something does not work
+title: "[Bug]: "
+labels: bug, triage
+---
+**What happened**
+
+**What should happen**
+`;
+
+test('an issue form becomes the text GitHub would write, with the story filled in', () => {
+  const tpl = core.parseIssueTemplate('1-feature.yml', FEATURE_FORM);
+  assert.equal(tpl.name, 'Feature');
+  assert.deepEqual(tpl.labels, ['enhancement']);
+  const body = core.fillTemplate(tpl.body, { title: 'Search by title', parent: 'Find a book (#7)', release: 'Release 1', steps: '' });
+  assert.match(body, /^### The need\n\n\*\*As a\*\* …, \*\*I want\*\* Search by title, \*\*so that\*\* …/);
+  assert.match(body, /### Acceptance criteria\n\n- \[ \] …/);
+  assert.match(body, /### Files\n\n/);
+  assert.match(body, /### Level\n\n### Ready to take/);
+  const preset = core.parseIssueTemplate('f.yml', FEATURE_FORM.replace('options: ["to decide", "beginner"]', 'options: ["to decide", "beginner"]\n      default: 1'));
+  assert.match(core.fillTemplate(preset.body, { title: 'x' }), /### Level\n\nbeginner/);
+  assert.match(body, /### Ready to take\n\n- \[ \] We know who it is for\.\n- \[ \] It fits in a day\./);
+  assert.doesNotMatch(body, /Thanks for writing/);
+  assert.match(body, /---\nFrom the story map in FigJam\.\nPart of: Find a book \(#7\)\nRelease on the map: Release 1$/);
+});
+
+test('a Markdown template keeps its text, title prefix and labels', () => {
+  const tpl = core.parseIssueTemplate('bug.md', BUG_MD);
+  assert.equal(tpl.name, 'Bug report');
+  assert.equal(tpl.title, '[Bug]: ');
+  assert.deepEqual(tpl.labels, ['bug', 'triage']);
+  assert.match(tpl.body, /^\*\*What happened\*\*/);
+  assert.match(tpl.body, /\{footer\}$/);
+});
+
+test('the config file and broken templates are not templates', () => {
+  assert.equal(core.parseIssueTemplate('config.yml', 'blank_issues_enabled: false\n'), null);
+  assert.equal(core.parseIssueTemplate('x.yml', 'name: [unclosed\n'), null);
+  assert.equal(core.parseIssueTemplate('x.yml', 'name: No body\n'), null);
+});
+
+test('a story picks the feature template, never the bug one', () => {
+  const feature = core.parseIssueTemplate('1-fonctionnalite.yml', FEATURE_FORM.replace('name: Feature', 'name: Fonctionnalité'));
+  const bug = core.parseIssueTemplate('bug.md', BUG_MD);
+  assert.equal(core.pickTemplate([bug, feature]), feature.file);
+  assert.equal(core.pickTemplate([bug]), null);
+  assert.equal(core.pickTemplate([]), null);
+});
+
+test('a sticky drafted with a repository template carries its labels and title prefix', () => {
+  const b = core.buildBacklog(board(), legend);
+  const matches = core.matchIssues(b, [{ number: 7, title: 'Find a book' }]);
+  const task = find(b, 'Back-office');
+  const bug = core.parseIssueTemplate('bug.md', BUG_MD);
+  const d = core.draftIssue(task.id, b, matches, repoMeta, publishing, bug);
+  assert.equal(d.title, '[Bug]: Back-office');
+  assert.deepEqual(d.labels, ['bug', 'triage', 'needs-refinement']);
+  assert.match(d.body, /^\*\*What happened\*\*/);
+  assert.match(d.body, /Part of: Find a book \(#7\)/);
+});
+
+test('drafts on the project board are read, and a converted one points to its issue', () => {
+  const page = {
+    id: 'P1', title: 'Board', fields: { nodes: [] },
+    items: { nodes: [
+      { id: 'I1', content: { id: 'D1', title: 'A draft' }, fieldValues: { nodes: [{ name: 'Todo', field: { name: 'Status' } }] } },
+      { id: 'I2', content: { number: 9, repository: { nameWithOwner: 'acme/app' } }, fieldValues: { nodes: [] } },
+    ] },
+  };
+  const p = core.readProject([page]);
+  assert.deepEqual(p.drafts, { I1: { title: 'A draft', status: 'Todo' } });
+  assert.equal(p.itemIds['acme/app#9'], 'I2');
+});
+
+test('a repository template is written in the language shown when it is filled', () => {
+  const tpl = core.parseIssueTemplate('1-feature.yml', FEATURE_FORM);
+  i18n.setLang('fr');
+  try {
+    const body = core.fillTemplate(tpl.body, { title: 'Chercher par titre', parent: '', release: 'Release 1', steps: '' });
+    assert.match(body, /\*\*En tant que\*\* …, \*\*je veux\*\* Chercher par titre/);
+    assert.match(body, /Depuis la story map dans FigJam\.\nRelease sur la carte : Release 1$/);
+  } finally {
+    i18n.setLang('en');
+  }
+});

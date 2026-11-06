@@ -12,7 +12,8 @@ Product managers plan in FigJam. Developers work in GitHub Issues and Projects. 
 
 - **Reads your board** the way your team lays it out: by rows, as in Figma's story map template, or by sticky colours. Each row or colour can be given another meaning.
 - **Links stickies to issues.** Identical titles are linked at once; for the others, the sticky's card shows the three likeliest issues.
-- **Creates issues from the map**, one at a time or in a batch, with a preview: the user story and acceptance criteria, the type, the parent as a sub-issue, the milestone from the release row, the project board and its starting status.
+- **Creates issues from the map**, one at a time or in a batch, with a preview: the user story and acceptance criteria, the type, the parent as a sub-issue, the milestone from the release row, the project board and its starting status. The text starts from the repository's own issue template when it has one.
+- **Starts a story as a draft on the project board**, the product manager's default, and converts it into an issue when it is ready.
 - **Shows the differences** (a renamed issue, another milestone, another parent, a sprint that ends too late, an issue dropped on GitHub) and settles each one: the map is right, GitHub is right, or keep both.
 - **Shows what moved this week**, field by field, including the project board's status, sprint and size.
 - **Puts a label on each linked sticky**, such as `#19 · Sprint 1 · Ready`, that follows the sticky on the board.

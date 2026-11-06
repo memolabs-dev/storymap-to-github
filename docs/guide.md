@@ -64,11 +64,21 @@ Click a sticky on the board, or a line in the tree, and its card opens at the to
 
 **Create the issue** creates it, makes it a sub-issue of its parent, adds it to the project board with its starting status, and links the sticky.
 
+**The repository's own template.** When the repository has issue templates in `.github/ISSUE_TEMPLATE`, issue forms (`.yml`) or Markdown (`.md`), the card starts from its feature or story template, never from its bug one. The story goes in the form's need field, a checklist in its acceptance criteria, and the other fields keep their headings, as GitHub would write them. The template's labels and title prefix come along, and where the sticky sits on the map is added at the end. The **Template** menu picks another one, or the plugin's own text. A team that wrote its own text under **More settings** keeps it.
+
+**A draft first.** With a project board picked, the card also offers **Draft on the board**: a draft issue, with a title and a text, on the board only, in its starting status. It is the default for the product manager, who can shape the story there before it reaches the repository. The sticky shows **Draft** in the tree.
+
+![Starting as a draft, from the repository's Feature template](images/en/template-draft.jpg)
+
+When it is ready, **Convert into an issue** makes it an issue of the repository, then gives it what a draft cannot hold: its type, labels, milestone, and its place under its parent. A draft converted on GitHub itself is linked to the sticky at the next refresh. **Not this draft** forgets the link and leaves the draft on the board.
+
+![A sticky's draft, ready to become an issue](images/en/draft-card.jpg)
+
 **Size.** On a linked sticky, the Size row sets the issue's size on the project board, or clears it.
 
 ## Publishing a batch
 
-In **Differences**, open **On the map only**: every sticky with no issue, each with a box to tick. Nothing is ticked at first. **Tick the new ones** ticks every sticky that looks like no existing issue; the ones marked `#19?` look like an issue that exists, so open their card and link them instead. **Create N issues** creates them parents first, so a new feature lands under its new epic, and a sub-task under its new task.
+Batches always create issues. In **Differences**, open **On the map only**: every sticky with no issue, each with a box to tick. Nothing is ticked at first. **Tick the new ones** ticks every sticky that looks like no existing issue; the ones marked `#19?` look like an issue that exists, so open their card and link them instead. **Create N issues** creates them parents first, so a new feature lands under its new epic, and a sub-task under its new task.
 
 ## Differences
 
@@ -112,7 +122,7 @@ Under **More settings** in the GitHub tab:
 - **Who does what**, for the whole team.
 - **The label of a new issue**, `needs-refinement` by default, empty for none.
 - **The status of a new issue** on the project board; empty means the board's first status.
-- **The text of a new issue**, with `{title}`, `{parent}`, `{release}` and `{steps}` filled in.
+- **The text of a new issue**, with `{title}`, `{parent}`, `{release}` and `{steps}` filled in. Empty means the repository's story template when it has one, else the plugin's user story.
 
 ## Good to know
 

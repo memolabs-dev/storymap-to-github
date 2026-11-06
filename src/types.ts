@@ -34,6 +34,9 @@ export interface BoardPayload {
   week: { at: string; moved: Array<Moved> } | null
   // When GitHub was last read, in milliseconds since 1970; null if never.
   readAt: number | null
+  // Stickies made into a draft on the project board, by sticky id. An empty
+  // title means the board was not read.
+  drafts: Record<string, { title: string; status: string | null }>
   settings: {
     repo: string
     project: string
@@ -47,6 +50,8 @@ export interface BoardPayload {
     // Whether the team allowed the plugin to write to this repository.
     writeAllowed: boolean
     publishing: Publishing
+    // The template file a new issue starts from, '' for the plugin's text.
+    defaultTemplate: string
     // The sizes the project board offers (its Size field), or null.
     sizeOptions: Array<string> | null
     // The statuses of the project board (its Status field), in order, or null.
@@ -212,7 +217,17 @@ export interface SetPublishingHandler extends EventHandler {
 }
 export interface PublishHandler extends EventHandler {
   name: 'PUBLISH'
-  handler: (id: string, title: string, body: string) => void
+  // templateFile: a repository template's file name, or '' for the plugin's
+  // text. asDraft: a draft on the project board instead of an issue.
+  handler: (id: string, title: string, body: string, templateFile: string, asDraft: boolean) => void
+}
+export interface ConvertDraftHandler extends EventHandler {
+  name: 'CONVERT_DRAFT'
+  handler: (id: string) => void
+}
+export interface UnlinkDraftHandler extends EventHandler {
+  name: 'UNLINK_DRAFT'
+  handler: (id: string) => void
 }
 export interface SetSizeHandler extends EventHandler {
   name: 'SET_SIZE'

@@ -52,6 +52,8 @@ import type {
   LinkHandler,
   OpenHandler,
   PublishHandler,
+  ConvertDraftHandler,
+  UnlinkDraftHandler,
   PublishManyHandler,
   ResolveHandler,
   SetSizeHandler,
@@ -273,6 +275,7 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
 function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
   const m = props.board.matches[props.id]
   if (!m) return null
+  const draft = m.status !== 'linked' && m.status !== 'exists' ? props.board.drafts[props.id] : undefined
   const pill = (cls: string, text: string, tip: string) => (
     <button
       class={`${styles.pill} ${cls}`}
@@ -287,6 +290,7 @@ function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
   )
   if (m.status === 'linked') return pill(styles.pillExists, `#${m.number}`, t('Linked to: {title}', { title: m.title }))
   if (m.status === 'exists') return pill(styles.pillExists, `#${m.number}`, t('Same title as: {title}', { title: m.title }))
+  if (draft) return pill(styles.pillDraft, t('Draft'), t('A draft on the project board: {title}', { title: draft.title || '…' }))
   if (m.status === 'maybe') return pill(styles.pillMaybe, `#${m.number}?`, t('Close to: {title}', { title: m.title }))
   // "New" on a sticky with no issue yet: not the same word in French as a new issue.
   return pill(styles.pillNew, t('New', undefined, 'sticky'), m.confirmed ? t('Marked as not on GitHub yet') : t('No issue with a close title'))
@@ -311,6 +315,10 @@ function Plugin() {
   // from its card, to show how it went there.
   const [draftTitle, setDraftTitle] = useState('')
   const [draftBody, setDraftBody] = useState('')
+  // The template and the kind (draft or issue) picked in the card; null
+  // means the default.
+  const [templateFile, setTemplateFile] = useState<string | null>(null)
+  const [asDraft, setAsDraft] = useState<boolean | null>(null)
   const [bodyTemplate, setBodyTemplate] = useState<string | null>(null)
   const [publishedFrom, setPublishedFrom] = useState<string | null>(null)
   const [auth, setAuth] = useState<AuthPayload>({ state: 'idle' })
@@ -354,6 +362,8 @@ function Plugin() {
         setSearch('')
         setDraftTitle('')
         setDraftBody('')
+        setTemplateFile(null)
+        setAsDraft(null)
         if (id) setTab('Map')
       }),
     ]
@@ -373,6 +383,8 @@ function Plugin() {
     setSearch('')
     setDraftTitle('')
     setDraftBody('')
+    setTemplateFile(null)
+    setAsDraft(null)
     focus(id, true)
   }
 
@@ -460,6 +472,7 @@ function Plugin() {
     }
     const { item, kind, parent } = found
     const issue = issueOf(board, item.id)
+    const onBoard = !issue ? board.drafts[item.id] : undefined
     const m = board.matches[item.id]
     const linkTo = (n: number | null) => emit<LinkHandler>('LINK', item.id, n)
     const canLink = kind !== 'step' && kind !== 'note'
@@ -524,7 +537,32 @@ function Plugin() {
             </div>
           </div>
         ) : null}
-        {canLink && !issue && board.issues.length ? (
+        {canLink && onBoard ? (
+          <div class={styles.cardIssue}>
+            <div>
+              <span class={`${styles.pill} ${styles.pillDraft}`}>{t('Draft')}</span> {onBoard.title || item.title}
+            </div>
+            <div class={styles.cardMeta}>{t('On the project board · {status}', { status: onBoard.status || t('no status') })}</div>
+            <p class={styles.help}>{t('It is only on the board for now. Convert it into an issue when it is ready to be worked on: type, parent, milestone and labels come then.')}</p>
+            <div class={styles.actions}>
+              {board.settings.writeAllowed && may('create') ? (
+                <Button
+                  disabled={status !== null && status.state === 'loading'}
+                  onClick={() => {
+                    setPublishedFrom(item.id)
+                    emit<ConvertDraftHandler>('CONVERT_DRAFT', item.id)
+                  }}
+                >
+                  {t('Convert into an issue')}
+                </Button>
+              ) : board.settings.writeAllowed ? (
+                askFor('create')
+              ) : null}
+              <Button secondary onClick={() => emit<UnlinkDraftHandler>('UNLINK_DRAFT', item.id)}>{t('Not this draft')}</Button>
+            </div>
+          </div>
+        ) : null}
+        {canLink && !issue && !onBoard && board.issues.length ? (
           <Fragment>
             <p class={styles.question}>{m && m.confirmed ? t('Marked as not on GitHub yet.') : t('Already on GitHub? Pick its issue')}</p>
             {candidates.map((c) => (
@@ -546,7 +584,7 @@ function Plugin() {
             </div>
           </Fragment>
         ) : null}
-        {canLink && !issue ? publishBox(item.id) : null}
+        {canLink && !issue && !onBoard ? publishBox(item.id) : null}
         {publishedFrom === item.id && status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
       </div>
     )
@@ -556,10 +594,16 @@ function Plugin() {
   // anything is written. Publishing is off until the team allows it for
   // this repository in the GitHub tab.
   const publishBox = (id: string) => {
-    const { meta, publishing, writeAllowed, repo: repoName, project: projectUrl, statusOptions } = board.settings
+    const { meta, publishing, writeAllowed, repo: repoName, project: projectUrl, statusOptions, defaultTemplate, role } = board.settings
     if (!meta) return null
-    const draft = draftIssue(id, b, board.matches, meta, publishing)
+    const templates = meta.templates || []
+    const chosen = templateFile !== null && (templateFile === '' || templates.some((x) => x.file === templateFile)) ? templateFile : defaultTemplate
+    const template = templates.find((x) => x.file === chosen) || null
+    const draft = draftIssue(id, b, board.matches, meta, publishing, template)
     if (!draft) return null
+    // A draft lives on the project board; the product manager starts there.
+    const canDraft = Boolean(projectUrl) && statusOptions !== null
+    const draftMode = canDraft && (asDraft === null ? role === 'pm' : asDraft)
     const busy = status !== null && status.state === 'loading'
     const title = draftTitle || draft.title
     const text = draftBody || draft.body
@@ -574,22 +618,56 @@ function Plugin() {
     ]
     // No starting status set: the issue goes to the board's first status.
     const firstStatus = statusOptions && statusOptions.length ? statusOptions[0] : null
-    if (projectUrl) lines.push([t('On the board'), draft.status || firstStatus || t('Added, without status')])
+    const boardLine: [string, string] | null = projectUrl ? [t('On the board'), draft.status || firstStatus || t('Added, without status')] : null
+    // A draft gets its place on the board at once; the rest waits for the issue.
+    if (boardLine && !draftMode) lines.push(boardLine)
+    const list = (rows: Array<[string, string]>) => (
+      <dl class={styles.draft}>
+        {rows.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    )
     return (
       <div class={styles.publish}>
-        <p class={styles.question}>{t('Not yet? Create its issue in {repo}', { repo: repoName })}</p>
-        <span class={styles.fieldLabel}>{t('Title')}</span>
+        <p class={styles.question}>{draftMode ? t('Not yet? Start it as a draft on the board') : t('Not yet? Create its issue in {repo}', { repo: repoName })}</p>
+        {canDraft ? (
+          <div style={{ marginBottom: 8 }}>
+            <SegmentedControl
+              value={draftMode ? 'draft' : 'issue'}
+              options={[
+                { value: 'draft', children: t('Draft on the board') },
+                { value: 'issue', children: t('Issue') },
+              ]}
+              onValueChange={(v: string) => setAsDraft(v === 'draft')}
+            />
+          </div>
+        ) : null}
+        {templates.length ? (
+          <Fragment>
+            <span class={styles.fieldLabel}>{t('Template')}</span>
+            <Dropdown
+              value={chosen}
+              options={[...templates.map((x) => ({ value: x.file, text: x.name })), { value: '', text: t("The plugin's text") }]}
+              onValueChange={(v: string) => {
+                setTemplateFile(v)
+                // The text and title start again from the template picked.
+                setDraftBody('')
+                setDraftTitle('')
+              }}
+            />
+          </Fragment>
+        ) : null}
+        <span class={styles.fieldLabel} style={{ marginTop: templates.length ? 8 : 0 }}>{t('Title')}</span>
         <Textbox value={title} onValueInput={setDraftTitle} spellCheck={false} />
-        <span class={styles.fieldLabel} style={{ marginTop: 8 }}>{t('Story and acceptance criteria')}</span>
+        <span class={styles.fieldLabel} style={{ marginTop: 8 }}>{template ? t('Text, from the template "{name}"', { name: template.name }) : t('Story and acceptance criteria')}</span>
         <TextboxMultiline value={text} onValueInput={setDraftBody} rows={9} grow spellCheck />
-        <dl class={styles.draft}>
-          {lines.map(([k, v]) => (
-            <Fragment key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </Fragment>
-          ))}
-        </dl>
+        {draftMode && boardLine ? list([boardLine]) : null}
+        {draftMode ? <p class={styles.help}>{t('A draft has only a title and a text. These come when it becomes an issue:')}</p> : null}
+        {list(lines)}
         {draft.warnings.map((w) => (
           <div key={w} class={`${styles.notice} ${styles.warn}`}>{w}</div>
         ))}
@@ -601,10 +679,10 @@ function Plugin() {
               disabled={busy || !title.trim()}
               onClick={() => {
                 setPublishedFrom(id)
-                emit<PublishHandler>('PUBLISH', id, title, text)
+                emit<PublishHandler>('PUBLISH', id, title, text, chosen, draftMode)
               }}
             >
-              {t('Create the issue')}
+              {draftMode ? t('Add the draft to the board') : t('Create the issue')}
             </Button>
           </div>
         ) : (
@@ -808,7 +886,8 @@ function Plugin() {
   // all at once, except those that look like an issue that already exists.
   const batch = (items: Array<{ id: string; title: string; kind: string }>) => {
     const s = board.settings
-    const publishable = items.filter((i) => i.kind === 'epic' || i.kind === 'feature' || i.kind === 'task')
+    // A sticky with a draft on the board is converted from its card, not published again.
+    const publishable = items.filter((i) => (i.kind === 'epic' || i.kind === 'feature' || i.kind === 'task') && !board.drafts[i.id])
     const lookalike = (i: { title: string; kind: string }) => {
       const best = suggestIssues(i.title, i.kind, board.issues.map((x) => ({ number: x.number, title: x.title })), 1)[0]
       return best && best.score >= 0.3 ? best : null
