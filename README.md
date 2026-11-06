@@ -29,6 +29,8 @@ Nothing is written to GitHub until you click, and only in repositories where the
 - [Install](docs/install.md): add the plugin, connect GitHub, and what is kept where.
 - [Guide](docs/guide.md): every tab and every action.
 - [User stories](docs/user-stories.md): what a product manager needs, and where each story stands.
+- [Privacy](docs/privacy.md): what the plugin reads, keeps and sends.
+- [Figma Community listing](docs/community-listing.md): the text and checklist for publishing.
 - En français : [installation](docs/fr/installation.md) et [guide](docs/fr/guide.md). The plugin itself speaks English and French.
 
 ## Try it on a copy
