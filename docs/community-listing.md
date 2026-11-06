@@ -45,6 +45,10 @@ Restricted, as declared in the manifest:
 - Published by Memo Labs, from the Figma profile https://www.figma.com/@memolabs
 - Support contact: contact@memolabs.dev
 
+## Status
+
+Submitted on 6 November 2026 from the Figma desktop app, author Guillaume Flambard (@memolabs), category Software development, restricted network access. In review; Figma answers by email. Data security answers were left empty and can be added later.
+
 ## Before pressing Publish
 
 - Two-factor authentication is on for the Figma account that publishes as @memolabs.

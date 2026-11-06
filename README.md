@@ -61,7 +61,7 @@ npm run watch
 
 ## Status
 
-Works end to end on a copy of a real board and a test repository: reading, linking, creating issues, settling differences, the weekly view, roles and the starting template. Not yet published on Figma Community, so for now each person adds it as a development plugin. Dark theme not checked yet.
+Works end to end on a copy of a real board and a test repository: reading, linking, creating issues, settling differences, the weekly view, roles and the starting template. Submitted to Figma Community on 6 November 2026, as Storymap to GitHub by Guillaume Flambard (@memolabs), and in review there. Until Figma approves it, each person adds it as a development plugin. In FigJam the plugin follows the editor's theme, which stayed light when Figma was set to dark.
 
 ## Contact
 
