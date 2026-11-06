@@ -25,9 +25,9 @@ The plugin reads the whole current page and needs edit access to the file: Figma
 
 ## Linking stickies and issues
 
-In the GitHub tab, name the repository and press Compare. Items whose title matches an issue (case, accents, `Epic:` prefixes and small words ignored) are linked. For the others, click the sticky on the board: its card shows the three issues it most likely is, with the words they share, a search box, and "Not on GitHub yet". Those choices stay on your computer.
+In the GitHub tab, name the repository and press Compare. Items whose title matches an issue (case, accents, `Epic:` prefixes and small words ignored) are linked. For the others, click the sticky on the board: its card shows the three issues it most likely is, with the words they share, a search box, and "Not on GitHub yet". Links are saved in the file, on each sticky and for each repository, so everyone working on the board sees the same ones.
 
-**Labels on the board.** Once a repository is compared, the "Labels on the board" switch puts a small locked label in the corner of every linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves, are updated on every read, and all go away when the switch is turned off. They are the only thing the plugin writes, and only on the board.
+**Labels on the board.** Once a repository is compared, the "Labels on the board" switch puts a small locked label in the corner of every linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves, are updated on every read, and all go away when the switch is turned off. Labels and links are the only things the plugin writes, and only on the board.
 
 ## Drift: where the map and GitHub disagree
 
@@ -47,6 +47,18 @@ npm run build
 ```
 
 Then in FigJam: Plugins, Development, Import plugin from manifest, and pick the `manifest.json` the build wrote. Open the page that holds your story map and run Storymap to GitHub.
+
+## Try it on a copy
+
+Try the plugin on a copy of the FigJam board, and, before anything writes to GitHub, on a copy of the repository. These scripts build a private copy of a real backlog: labels, milestones, issues with the same numbers, sub-issues, and a project board with the same statuses, sizes and sprints. They only read the source and only write to the copy.
+
+```bash
+node scripts/make-sandbox.mjs owner/repo https://github.com/orgs/owner/projects/12 your-org/repo-sandbox
+node scripts/finish-sandbox.mjs owner/repo https://github.com/orgs/owner/projects/12 your-org/repo-sandbox
+node scripts/check-sandbox.mjs owner/repo https://github.com/orgs/owner/projects/12 your-org/repo-sandbox https://github.com/orgs/your-org/projects/N
+```
+
+Mentions in the copied issues are broken so nobody is notified. If the copy's organisation has no Epic issue type, epics get an `epic` label instead.
 
 ## Develop
 

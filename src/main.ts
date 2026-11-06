@@ -123,6 +123,10 @@ const toItem = (node: SceneNode): BoardItem => {
 
 const WANTED = new Set(['STICKY', 'SHAPE_WITH_TEXT', 'SECTION', 'TEXT', 'CONNECTOR', 'LINE'])
 
+// Stickies of the page by id, kept from the last read, to read and write
+// their links.
+let stickies = new Map<string, StickyNode | ShapeWithTextNode>()
+
 // The whole current page is read; the plugin's own labels are left out.
 function readBoard() {
   const nodes = figma.currentPage.findAll((n) => WANTED.has(n.type) && !isLabel(n))
@@ -130,6 +134,41 @@ function readBoard() {
   for (const n of figma.currentPage.findAll(() => true)) state.nodeTypes[n.type] = (state.nodeTypes[n.type] || 0) + 1
   state.items = nodes.map(toItem)
   state.palette = buildPalette(state.items)
+  stickies = new Map()
+  for (const n of nodes) if (n.type === 'STICKY' || n.type === 'SHAPE_WITH_TEXT') stickies.set(n.id, n)
+  readLinks()
+}
+
+// Links between stickies and issues live in the file, on each sticky, as
+// plugin data keyed by repository, so everyone on the board sees the same
+// links and each repository keeps its own. The value is the issue number,
+// or 0 for "not on GitHub yet".
+const linkKey = () => `link:${state.repo.toLowerCase()}`
+
+function readLinks() {
+  state.links = {}
+  if (!state.repo) return
+  for (const [id, node] of stickies) {
+    const value = node.getPluginData(linkKey())
+    if (value !== '') state.links[id] = Number(value)
+  }
+}
+
+function writeLink(id: string, number: number | null) {
+  const node = stickies.get(id)
+  if (!node || !state.repo) return
+  node.setPluginData(linkKey(), number === null ? '' : String(number))
+  if (number === null) delete state.links[id]
+  else state.links[id] = number
+}
+
+// Links made before they lived in the file were kept on this computer only;
+// they are moved onto the stickies once, for the repository then connected.
+async function moveOldLinks() {
+  const old = (await figma.clientStorage.getAsync(fileKey('links'))) as Record<string, number> | undefined
+  if (!old || !state.repo) return
+  for (const [id, number] of Object.entries(old)) if (stickies.get(id)?.getPluginData(linkKey()) === '') writeLink(id, number)
+  await figma.clientStorage.deleteAsync(fileKey('links'))
 }
 
 async function loadSettings() {
@@ -138,7 +177,8 @@ async function loadSettings() {
   state.repo = (await figma.clientStorage.getAsync('repo')) || ''
   state.project = (await figma.clientStorage.getAsync('project')) || ''
   state.token = (await figma.clientStorage.getAsync('token')) || ''
-  state.links = (await figma.clientStorage.getAsync(fileKey('links'))) || {}
+  await moveOldLinks()
+  readLinks()
   const reading = (await figma.clientStorage.getAsync(fileKey('reading'))) || {}
   state.mode = reading.mode || 'auto'
   state.rowTypes = reading.rowTypes || {}
@@ -469,6 +509,7 @@ export default function () {
       await figma.clientStorage.setAsync('repo', state.repo)
       await figma.clientStorage.setAsync('project', state.project)
       if (token) await figma.clientStorage.setAsync('token', state.token)
+      readLinks()
       await compare()
     })().catch(fail)
   })
@@ -486,9 +527,8 @@ export default function () {
   })
 
   on<LinkHandler>('LINK', (id, number) => {
-    if (number === null) delete state.links[id]
-    else state.links[id] = number
-    void figma.clientStorage.setAsync(fileKey('links'), state.links).then(publish).catch(fail)
+    writeLink(id, number)
+    publish()
   })
 
   on<ForgetTokenHandler>('FORGET_TOKEN', () => {
