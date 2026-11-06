@@ -1,10 +1,6 @@
-// Storymap to GitHub, a FigJam plugin.
-// Reads a user story map and previews the GitHub backlog it would become:
-// epics, features with their steps, tasks and milestones. It writes nothing,
-// neither to GitHub nor to the board.
-//
-// One file on purpose: the pure functions at the top run both in Figma and in
-// node:test (see test/), the Figma glue at the bottom only runs in Figma.
+// Storymap to GitHub: the board reading logic, with no Figma API in it, so
+// it runs the same in the plugin and in node:test (see test/). Types are in
+// core.d.ts.
 
 const TYPES = ['epic', 'feature', 'step', 'task', 'note', 'ignore'];
 
@@ -678,233 +674,37 @@ function toMarkdown(backlog, matches = {}) {
   return lines.join('\n').trim() + '\n';
 }
 
-if (typeof module !== 'undefined') {
-  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows, buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl, projectQuery, readProject, toMarkdown };
+// The few issues a sticky most likely is, best first, with the words they
+// share, so the team picks from three instead of scrolling every issue.
+function suggestIssues(title, kind, issues, count = 3) {
+  const pool = kind === 'epic' && issues.some(isEpicIssue) ? issues.filter(isEpicIssue) : issues.filter((i) => !isEpicIssue(i));
+  const mine = stems(title);
+  return pool
+    .map((issue) => {
+      const theirs = stems(issue.title);
+      const shared = [...mine].filter((w) => theirs.has(w));
+      const score = normalize(issue.title) === normalize(title) ? 1.01 : similarity(title, issue.title, kind === 'epic');
+      return { number: issue.number, title: issue.title, score, shared };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score || a.number - b.number)
+    .slice(0, count);
 }
 
-// ---------------------------------------------------------------------------
-// Figma glue. Runs only inside Figma.
-// ---------------------------------------------------------------------------
-
-if (typeof figma !== 'undefined') {
-  const state = { items: [], palette: [], legend: {}, backlog: null, matches: {}, issues: null, links: {}, scope: 'page' };
-  // Hand-made links between stickies and issues stay on this computer
-  // (clientStorage), keyed by file name, so the board itself is not changed.
-  const linksKey = () => `links:${figma.root.name}`;
-
-  const solidFill = (node) => {
-    const fills = node.fills;
-    if (!Array.isArray(fills)) return null;
-    const paint = fills.find((f) => f.type === 'SOLID' && f.visible !== false);
-    return paint ? { r: paint.color.r, g: paint.color.g, b: paint.color.b } : null;
-  };
-
-  const isInLegend = (node) => {
-    for (let p = node.parent; p && p.type !== 'PAGE'; p = p.parent) {
-      if (p.type === 'SECTION' && LEGEND_PATTERN.test(p.name)) return true;
-    }
-    return false;
-  };
-
-  const toItem = (node) => {
-    const box = node.absoluteBoundingBox || { x: node.x, y: node.y, width: node.width, height: node.height };
-    const item = { id: node.id, type: node.type, name: node.name, x: box.x, y: box.y, w: box.width, h: box.height };
-    if (node.type === 'STICKY' || node.type === 'SHAPE_WITH_TEXT') {
-      item.text = node.text.characters;
-      item.fill = solidFill(node);
-      item.inLegend = isInLegend(node);
-    } else if (node.type === 'TEXT') {
-      item.text = node.characters;
-    } else if (node.type === 'CONNECTOR') {
-      item.from = node.connectorStart && node.connectorStart.endpointNodeId;
-      item.to = node.connectorEnd && node.connectorEnd.endpointNodeId;
-    }
-    return item;
-  };
-
-  const WANTED = new Set(['STICKY', 'SHAPE_WITH_TEXT', 'SECTION', 'TEXT', 'CONNECTOR', 'LINE']);
-
-  const readBoard = () => {
-    const selection = figma.currentPage.selection;
-    let nodes = [];
-    if (selection.length) {
-      state.scope = 'selection';
-      for (const node of selection) {
-        if (WANTED.has(node.type)) nodes.push(node);
-        if ('findAll' in node) nodes.push(...node.findAll((n) => WANTED.has(n.type)));
-      }
-    } else {
-      state.scope = 'page';
-      nodes = figma.currentPage.findAll((n) => WANTED.has(n.type));
-    }
-    // What the page is made of, shown in the Legend tab to explain a reading.
-    state.nodeTypes = {};
-    for (const n of figma.currentPage.findAll(() => true)) state.nodeTypes[n.type] = (state.nodeTypes[n.type] || 0) + 1;
-    state.items = nodes.map(toItem);
-    state.palette = buildPalette(state.items);
-  };
-
-  const loadSettings = async () => {
-    const saved = (await figma.clientStorage.getAsync('legend')) || {};
-    state.legend = { ...defaultLegend(state.palette), ...saved };
-    state.repo = (await figma.clientStorage.getAsync('repo')) || '';
-    state.project = (await figma.clientStorage.getAsync('project')) || '';
-    state.token = (await figma.clientStorage.getAsync('token')) || '';
-    state.links = (await figma.clientStorage.getAsync(linksKey())) || {};
-    // How the board is read: per file, since two boards can follow two
-    // conventions. 'auto' picks rows for Figma's template, colours otherwise.
-    const reading = (await figma.clientStorage.getAsync(`reading:${figma.root.name}`)) || {};
-    state.mode = reading.mode || 'auto';
-    state.rowTypes = reading.rowTypes || {};
-  };
-
-  const saveReading = () => figma.clientStorage.setAsync(`reading:${figma.root.name}`, { mode: state.mode, rowTypes: state.rowTypes });
-
-  const publish = () => {
-    state.backlog = buildBacklog(state.items, state.legend, { mode: state.mode, rowTypes: state.rowTypes });
-    state.matches = state.issues ? matchIssues(state.backlog, state.issues, state.links) : {};
-    figma.ui.postMessage({
-      type: 'board',
-      scope: state.scope,
-      page: figma.currentPage.name,
-      palette: state.palette,
-      legend: state.legend,
-      backlog: state.backlog,
-      matches: state.matches,
-      issues: state.issues ? state.issues.map((i) => ({ number: i.number, title: i.title, sprint: i.sprint ? i.sprint.title : null, status: i.status || null, size: i.size || null })) : [],
-      nodeTypes: state.nodeTypes,
-      drift: state.issues ? findDrift(state.backlog, state.issues, state.matches) : null,
-      markdown: toMarkdown(state.backlog, state.matches),
-      settings: { repo: state.repo, project: state.project, mode: state.mode, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
-      sprints: state.sprints || [],
-    });
-  };
-
-  const fetchIssues = async () => {
-    if (!/^[\w.-]+\/[\w.-]+$/.test(state.repo)) throw new Error('Enter the repository as owner/name.');
-    const headers = { Accept: 'application/vnd.github+json' };
-    if (state.token) headers.Authorization = `Bearer ${state.token}`;
-    const all = [];
-    for (let page = 1; page <= 10; page += 1) {
-      const res = await fetch(`https://api.github.com/repos/${state.repo}/issues?state=all&per_page=100&page=${page}`, { headers });
-      if (!res.ok) {
-        if (res.status === 404) throw new Error(`Repository ${state.repo} not found, or private without a token.`);
-        if (res.status === 401) throw new Error('GitHub refused the token.');
-        if (res.status === 403) throw new Error('GitHub rate limit reached. Add a token or retry later.');
-        throw new Error(`GitHub answered ${res.status}.`);
-      }
-      const batch = await res.json();
-      all.push(...batch.filter((i) => !i.pull_request).map((i) => ({
-        number: i.number,
-        title: i.title,
-        html_url: i.html_url,
-        state: i.state,
-        state_reason: i.state_reason || null,
-        type: i.type ? i.type.name : null,
-        milestone: i.milestone ? i.milestone.title : null,
-        milestoneDue: i.milestone && i.milestone.due_on ? i.milestone.due_on.slice(0, 10) : null,
-        parent: i.parent_issue_url ? Number(i.parent_issue_url.split('/').pop()) : null,
-      })));
-      if (batch.length < 100) break;
-    }
-    return all;
-  };
-
-  // Sprints live in a GitHub Projects board, read through GraphQL, which
-  // always needs a token (read access to projects).
-  const fetchProject = async () => {
-    const target = parseProjectUrl(state.project);
-    if (!target) throw new Error('Paste the project board address, like https://github.com/orgs/acme/projects/12.');
-    if (!state.token) throw new Error('Reading sprints needs a token that can read projects (classic token: read:project).');
-    const pages = [];
-    let cursor = null;
-    do {
-      const res = await fetch('https://api.github.com/graphql', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: projectQuery(target.kind), variables: { owner: target.owner, number: target.number, cursor } }),
-      });
-      const body = await res.json();
-      const project = body.data && body.data.owner && body.data.owner.projectV2;
-      if (!res.ok || !project) throw new Error(`Could not read the project board${body.errors ? `: ${body.errors[0].message}` : '.'}`);
-      pages.push(project);
-      cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null;
-    } while (cursor && pages.length < 20);
-    return readProject(pages);
-  };
-
-  const withProject = (issues, project) => issues.map((i) => ({ ...i, ...(project.items[`${state.repo}#${i.number}`.toLowerCase()] || {}) }));
-
-  figma.showUI(__html__, { width: 420, height: 680, themeColors: true, title: 'Storymap to GitHub' });
-
-  figma.ui.onmessage = async (msg) => {
-    try {
-      if (msg.type === 'ready' || msg.type === 'refresh') {
-        readBoard();
-        await loadSettings();
-        publish();
-      } else if (msg.type === 'set-mode') {
-        state.mode = ['auto', 'rows', 'colours'].includes(msg.mode) ? msg.mode : 'auto';
-        await saveReading();
-        publish();
-      } else if (msg.type === 'set-row-type') {
-        state.rowTypes[msg.name] = msg.value;
-        await saveReading();
-        publish();
-      } else if (msg.type === 'set-legend') {
-        state.legend[msg.hex] = msg.value;
-        const saved = (await figma.clientStorage.getAsync('legend')) || {};
-        saved[msg.hex] = msg.value;
-        await figma.clientStorage.setAsync('legend', saved);
-        publish();
-      } else if (msg.type === 'focus') {
-        const node = await figma.getNodeByIdAsync(msg.id);
-        if (node && node.type !== 'PAGE' && node.type !== 'DOCUMENT') figma.viewport.scrollAndZoomIntoView([node]);
-      } else if (msg.type === 'compare') {
-        state.repo = (msg.repo || '').trim();
-        if (typeof msg.token === 'string' && msg.token) state.token = msg.token.trim();
-        await figma.clientStorage.setAsync('repo', state.repo);
-        if (msg.token) await figma.clientStorage.setAsync('token', state.token);
-        state.project = (msg.project || '').trim();
-        await figma.clientStorage.setAsync('project', state.project);
-        figma.ui.postMessage({ type: 'status', state: 'loading', text: `Reading issues of ${state.repo}…` });
-        state.issues = await fetchIssues();
-        let note = `${state.issues.length} issues read from ${state.repo}.`;
-        state.sprints = [];
-        if (state.project) {
-          try {
-            const project = await fetchProject();
-            state.issues = withProject(state.issues, project);
-            state.sprints = project.sprints;
-            note += ` Sprints read from "${project.title}" (${project.sprints.length}).`;
-          } catch (err) {
-            note += ` Sprints not read: ${err.message}`;
-          }
-        }
-        publish();
-        figma.ui.postMessage({ type: 'status', state: note.includes('not read') ? 'warn' : 'ok', text: note });
-      } else if (msg.type === 'why') {
-        const headers = { Accept: 'application/vnd.github+json' };
-        if (state.token) headers.Authorization = `Bearer ${state.token}`;
-        const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${msg.number}/events?per_page=100`, { headers });
-        const lines = res.ok ? explainEvents(await res.json(), msg.kind) : null;
-        figma.ui.postMessage({ type: 'why-result', key: msg.key, lines, error: res.ok ? null : `GitHub answered ${res.status}.` });
-      } else if (msg.type === 'open') {
-        if (/^https:\/\/github\.com\//.test(msg.url)) figma.openExternal(msg.url);
-      } else if (msg.type === 'link') {
-        if (msg.number === null) delete state.links[msg.id];
-        else state.links[msg.id] = msg.number;
-        await figma.clientStorage.setAsync(linksKey(), state.links);
-        publish();
-      } else if (msg.type === 'forget-token') {
-        state.token = '';
-        await figma.clientStorage.deleteAsync('token');
-        publish();
-      }
-    } catch (err) {
-      figma.ui.postMessage({ type: 'status', state: 'error', text: err.message || String(err) });
-    }
-  };
-
-  figma.on('selectionchange', () => figma.ui.postMessage({ type: 'selection-changed', count: figma.currentPage.selection.length }));
+// The short text of the label the plugin puts on a linked sticky:
+// "#19 · Sprint 1 · Ready", or "#19 · Closed".
+function labelText(issue) {
+  const parts = [`#${issue.number}`];
+  if (issue.state === 'closed') parts.push('Closed');
+  else {
+    if (issue.sprint) parts.push(typeof issue.sprint === 'string' ? issue.sprint : issue.sprint.title);
+    if (issue.status) parts.push(issue.status);
+  }
+  return parts.join(' · ');
 }
+
+export {
+  TYPES, LEGEND_PATTERN, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows,
+  buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl,
+  projectQuery, readProject, toMarkdown, suggestIssues, labelText,
+};

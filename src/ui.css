@@ -1,0 +1,74 @@
+/* Plugin window styles. Colours come from Figma's theme variables. */
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.header { padding: 12px 12px 0; }
+.titleRow { display: flex; align-items: center; gap: 8px; }
+.title { flex: 1; font-weight: 600; font-size: 13px; }
+.scope { color: var(--figma-color-text-secondary); margin: 4px 0 8px; }
+.main { flex: 1; overflow: auto; padding: 0 12px 12px; }
+.footer { border-top: 1px solid var(--figma-color-border); padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+.footerNote { flex: 1; color: var(--figma-color-text-tertiary); }
+
+.summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0; }
+.stat { background: var(--figma-color-bg-secondary); border-radius: 6px; padding: 8px; }
+.statValue { display: block; font-size: 16px; font-weight: 600; line-height: 1.2; }
+.statLabel { color: var(--figma-color-text-secondary); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.chip { border: 1px solid var(--figma-color-border); background: var(--figma-color-bg); color: var(--figma-color-text-secondary); border-radius: 999px; padding: 2px 9px; cursor: pointer; font: inherit; }
+.chipOn { background: var(--figma-color-text); color: var(--figma-color-bg); border-color: var(--figma-color-text); }
+
+.notice { border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+.info { background: var(--figma-color-bg-secondary); color: var(--figma-color-text-secondary); }
+.warn { background: var(--figma-color-bg-warning-tertiary); color: var(--figma-color-text-warning); }
+.error { background: var(--figma-color-bg-danger-tertiary); color: var(--figma-color-text-danger); }
+.ok { background: var(--figma-color-bg-success-tertiary); color: var(--figma-color-text-success); }
+
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { padding-left: 16px; margin-left: 7px; border-left: 1px solid var(--figma-color-border); }
+.row { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+.row:hover, .rowSelected { background: var(--figma-color-bg-hover); }
+.rowSelected { box-shadow: inset 0 0 0 1px var(--figma-color-border-selected); }
+.dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.epic { background: #f5c33b; }
+.feature { background: #4ba3f7; }
+.step { background: #57c26a; }
+.task { background: #a77bf3; }
+.note { background: #f07fb5; }
+.kind { color: var(--figma-color-text-tertiary); width: 50px; flex: none; }
+.label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.labelStrong { font-weight: 600; }
+.steps { color: var(--figma-color-text-secondary); padding: 0 6px 4px 66px; }
+.pill { border-radius: 4px; padding: 0 5px; font-size: 11px; line-height: 18px; white-space: nowrap; flex: none; border: 0; font-family: inherit; }
+.pillMilestone { background: var(--figma-color-bg-secondary); color: var(--figma-color-text-secondary); }
+.pillSprint { background: var(--figma-color-bg); color: var(--figma-color-text-secondary); box-shadow: inset 0 0 0 1px var(--figma-color-border); }
+.pillNew { background: var(--figma-color-bg-selected); color: var(--figma-color-text-brand); }
+.pillExists { background: var(--figma-color-bg-success-tertiary); color: var(--figma-color-text-success); }
+.pillMaybe { background: var(--figma-color-bg-warning-tertiary); color: var(--figma-color-text-warning); }
+.sectionTitle { color: var(--figma-color-text-secondary); font-weight: 600; margin: 16px 0 6px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+
+.card { border: 1px solid var(--figma-color-border-selected); border-radius: 8px; padding: 10px; margin: 12px 0; }
+.cardHead { display: flex; align-items: center; gap: 6px; }
+.cardTitle { flex: 1; font-weight: 600; }
+.cardMeta { color: var(--figma-color-text-secondary); margin: 4px 0 8px; }
+.cardIssue { background: var(--figma-color-bg-secondary); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.candidate { display: block; width: 100%; text-align: left; border: 1px solid var(--figma-color-border); background: var(--figma-color-bg); border-radius: 6px; padding: 6px 8px; margin-bottom: 4px; cursor: pointer; font: inherit; color: inherit; }
+.candidate:hover { background: var(--figma-color-bg-hover); }
+.candidateWhy { display: block; color: var(--figma-color-text-tertiary); font-size: 11px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.linkButton { background: none; border: 0; padding: 0; color: var(--figma-color-text-brand); cursor: pointer; font: inherit; text-decoration: underline; }
+.close { background: none; border: 0; cursor: pointer; color: var(--figma-color-text-secondary); font: inherit; }
+
+.drift { border: 1px solid var(--figma-color-border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+.driftHead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.driftSides { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 2px 8px; margin-bottom: 4px; }
+.driftSide { color: var(--figma-color-text-tertiary); }
+.history { margin: 4px 0 0; padding-left: 16px; color: var(--figma-color-text-secondary); }
+.help { color: var(--figma-color-text-tertiary); margin: 4px 0; }
+
+.legendRow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 120px; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--figma-color-border); }
+.swatch { width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--figma-color-border); }
+.rowMark { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--figma-color-text-secondary); background: var(--figma-color-bg-secondary); }
+.samples { color: var(--figma-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field { margin-bottom: 10px; }
+.fieldLabel { display: block; color: var(--figma-color-text-secondary); margin-bottom: 4px; }
+.empty { text-align: center; color: var(--figma-color-text-secondary); padding: 32px 16px; }

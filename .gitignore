@@ -1,3 +1,8 @@
-node_modules/
 .DS_Store
+*.log
+*.css.d.ts
+*.d.css.ts
+/build/
+/manifest.json
+node_modules/
 dev/local/

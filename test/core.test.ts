@@ -1,6 +1,6 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const core = require('../code.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as core from '../src/core.js';
 
 const YELLOW = { r: 1, g: 0.85, b: 0.4 };
 const BLUE = { r: 0.46, g: 0.76, b: 1 };
@@ -330,4 +330,24 @@ test('the Markdown draft lists the tree', () => {
   assert.match(md, /## Epic: Catalogue/);
   assert.match(md, /- Feature: Find a book\n {2}- Step: Search by title or author\n {2}- \[ \] Task: Back-office · P0 · MVP/);
   assert.match(md, /Milestones: P0 · MVP, P1/);
+});
+
+test('a selected sticky gets its three best candidate issues, with the words they share', () => {
+  const issues = [
+    { number: 19, title: 'Le back-office : vérifier et corriger la donnée' },
+    { number: 18, title: 'Calendrier des réservations' },
+    { number: 11, title: 'Épopée : Catalogue' },
+    { number: 7, title: 'Une page qui montre le design system' },
+  ];
+  const s = core.suggestIssues('Reservation calendar', 'task', issues);
+  assert.equal(s[0].number, 18);
+  assert.deepEqual(s[0].shared.sort(), ['calen', 'reser']);
+  assert.ok(s.every((x) => x.number !== 11), 'epics are not offered for a task');
+  assert.deepEqual(core.suggestIssues('Catalogue', 'epic', issues).map((x) => x.number), [11]);
+});
+
+test('the board label sums up the issue in a few words', () => {
+  assert.equal(core.labelText({ number: 19, state: 'open', sprint: { title: 'Sprint 1' }, status: 'Ready' }), '#19 · Sprint 1 · Ready');
+  assert.equal(core.labelText({ number: 8, state: 'open', sprint: 'Sprint 2' }), '#8 · Sprint 2');
+  assert.equal(core.labelText({ number: 3, state: 'closed', status: 'Done' }), '#3 · Closed');
 });

@@ -1,13 +1,43 @@
 {
   "name": "storymap-to-github",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "FigJam plugin: preview a user story map as GitHub epics, features, tasks and milestones",
+  "description": "FigJam plugin: read a user story map as GitHub epics, features, tasks and milestones, and see where it drifts from GitHub",
   "license": "MIT",
+  "dependencies": {
+    "@create-figma-plugin/ui": "^4.0.3",
+    "@create-figma-plugin/utilities": "^4.0.3",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@create-figma-plugin/build": "^4.0.3",
+    "@create-figma-plugin/tsconfig": "^4.0.3",
+    "@figma/plugin-typings": "1.142.0",
+    "typescript": "^5.9.3"
+  },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "build": "build-figma-plugin --typecheck --minify",
+    "watch": "build-figma-plugin --typecheck --watch",
+    "test": "node --test test/*.test.ts"
   },
   "engines": {
-    "node": ">=20"
-  }
+    "node": ">=22.18"
+  },
+  "figma-plugin": {
+    "editorType": [
+      "figjam"
+    ],
+    "id": "storymap-to-github-dev",
+    "name": "Storymap to GitHub",
+    "main": "src/main.ts",
+    "ui": "src/ui.tsx",
+    "documentAccess": "dynamic-page",
+    "networkAccess": {
+      "allowedDomains": [
+        "https://api.github.com"
+      ],
+      "reasoning": "Reads the issues and project board of the repository you name, to show each story map item's state and where the map and GitHub disagree."
+    }
+  },
+  "type": "module"
 }

@@ -1,0 +1,583 @@
+// Storymap to GitHub, the plugin window, built with Create Figma Plugin's
+// Preact components. It shows the map as a tree, the card of the selected
+// sticky, where the map and GitHub drift apart, and the reading settings.
+import {
+  Button,
+  Dropdown,
+  SearchTextbox,
+  SegmentedControl,
+  Tabs,
+  Textbox,
+  Toggle,
+  render,
+  useWindowResize,
+} from '@create-figma-plugin/ui'
+import { emit, on } from '@create-figma-plugin/utilities'
+import { Fragment, h } from 'preact'
+import { useEffect, useState } from 'preact/hooks'
+
+import { normalize, suggestIssues } from './core'
+import type { Drift, Feature, ItemType, MapNode, Task } from './core'
+import type {
+  BoardHandler,
+  BoardPayload,
+  CompareHandler,
+  FocusHandler,
+  ForgetTokenHandler,
+  IssueSummary,
+  LinkHandler,
+  OpenHandler,
+  ReadyHandler,
+  RefreshHandler,
+  ResizeWindowHandler,
+  SelectedHandler,
+  SetLabelsHandler,
+  SetLegendHandler,
+  SetModeHandler,
+  SetRowTypeHandler,
+  StatusHandler,
+  StatusPayload,
+  WhyHandler,
+  WhyResultHandler,
+} from './types'
+import styles from './ui.css'
+
+type Kind = 'epic' | 'feature' | 'step' | 'task' | 'note'
+
+const KIND_LABEL: Record<string, string> = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'Note', ignore: 'Ignore' }
+const TYPE_OPTIONS = (['epic', 'feature', 'step', 'task', 'note', 'ignore'] as Array<ItemType>).map((value) => ({ value, text: KIND_LABEL[value] }))
+const DRIFT_LABEL: Record<Drift['kind'], string> = { dropped: 'Dropped on GitHub', schedule: 'Planned too late', milestone: 'Milestone', parent: 'Parent', title: 'Title' }
+
+// Where an item sits in the tree, found by its sticky id.
+interface Located {
+  item: MapNode & Partial<Task>
+  kind: Kind
+  parent: string | null
+}
+
+function locate(board: BoardPayload, id: string): Located | null {
+  const b = board.backlog
+  const inTasks = (tasks: Array<Task>, parent: string): Located | null => {
+    for (const t of tasks) {
+      if (t.id === id) return { item: t, kind: 'task', parent }
+      const sub = inTasks(t.subtasks || [], t.title)
+      if (sub) return sub
+    }
+    return null
+  }
+  const inFeature = (f: Feature, parent: string | null): Located | null => {
+    if (f.id === id) return { item: f, kind: 'feature', parent }
+    const step = f.steps.find((s) => s.id === id)
+    if (step) return { item: step, kind: 'step', parent: f.title }
+    return inTasks(f.tasks, f.title)
+  }
+  for (const e of b.epics) {
+    if (e.id === id) return { item: e, kind: 'epic', parent: null }
+    for (const f of e.features) {
+      const found = inFeature(f, e.title)
+      if (found) return found
+    }
+    const t = inTasks(e.tasks, e.title)
+    if (t) return t
+  }
+  for (const f of b.looseFeatures) {
+    const found = inFeature(f, null)
+    if (found) return found
+  }
+  const note = b.notes.find((n) => n.id === id)
+  if (note) return { item: note, kind: 'note', parent: null }
+  return null
+}
+
+// The issue an item is, when linked by hand or by an identical title.
+function issueOf(board: BoardPayload, id: string): IssueSummary | null {
+  const m = board.matches[id]
+  if (!m || (m.status !== 'linked' && m.status !== 'exists')) return null
+  return board.issues.find((i) => i.number === m.number) || null
+}
+
+// The words of an issue title that a sticky shares with it, as written.
+function sharedWords(title: string, stems: Array<string>): string {
+  const words = normalize(title).split(' ').filter((w) => stems.includes(w.slice(0, 5)))
+  return [...new Set(words)].join(', ')
+}
+
+function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
+  const m = props.board.matches[props.id]
+  if (!m) return null
+  const pill = (cls: string, text: string, tip: string) => (
+    <button
+      class={`${styles.pill} ${cls}`}
+      title={`${tip}. Click to change.`}
+      onClick={(e) => {
+        e.stopPropagation()
+        props.onOpen()
+      }}
+    >
+      {text}
+    </button>
+  )
+  if (m.status === 'linked') return pill(styles.pillExists, `#${m.number}`, `Linked to: ${m.title}`)
+  if (m.status === 'exists') return pill(styles.pillExists, `#${m.number}`, `Same title as: ${m.title}`)
+  if (m.status === 'maybe') return pill(styles.pillMaybe, `#${m.number}?`, `Close to: ${m.title}`)
+  return pill(styles.pillNew, 'New', m.confirmed ? 'Marked as not on GitHub yet' : 'No issue with a close title')
+}
+
+function Plugin() {
+  const [board, setBoard] = useState<BoardPayload | null>(null)
+  const [status, setStatus] = useState<StatusPayload | null>(null)
+  const [tab, setTab] = useState('Preview')
+  const [selected, setSelected] = useState<string | null>(null)
+  const [filter, setFilter] = useState('all')
+  const [sprintFilter, setSprintFilter] = useState('all')
+  const [why, setWhy] = useState<Record<string, { loading?: boolean; lines?: Array<string> | null; error?: string | null }>>({})
+  const [repo, setRepo] = useState('')
+  const [project, setProject] = useState('')
+  const [token, setToken] = useState('')
+  const [search, setSearch] = useState('')
+  const [copied, setCopied] = useState('')
+
+  useWindowResize((size) => emit<ResizeWindowHandler>('RESIZE_WINDOW', size), { minWidth: 360, minHeight: 480, maxWidth: 900, maxHeight: 1400 })
+
+  useEffect(() => {
+    const offs = [
+      on<BoardHandler>('BOARD', (next) => {
+        setBoard(next)
+        setRepo((r) => r || next.settings.repo)
+        setProject((p) => p || next.settings.project)
+      }),
+      on<StatusHandler>('STATUS', setStatus),
+      on<WhyResultHandler>('WHY_RESULT', (key, lines, error) => setWhy((w) => ({ ...w, [key]: { lines, error } }))),
+      on<SelectedHandler>('SELECTED', (id) => {
+        setSelected(id)
+        setSearch('')
+        if (id) setTab('Preview')
+      }),
+    ]
+    emit<ReadyHandler>('READY')
+    return () => offs.forEach((off) => off())
+  }, [])
+
+  if (!board) return <div class={styles.empty}>Reading the board…</div>
+
+  const b = board.backlog
+  const focus = (id: string, zoom: boolean) => emit<FocusHandler>('FOCUS', id, zoom)
+  const open = (id: string) => {
+    setSelected(id)
+    setSearch('')
+    focus(id, true)
+  }
+
+  // Filters by release and by sprint; a task stays when one of its sub-tasks matches.
+  const sprintOk = (t: Task) => {
+    if (sprintFilter === 'all') return true
+    const issue = issueOf(board, t.id)
+    return sprintFilter === 'none' ? !(issue && issue.sprint) : Boolean(issue && issue.sprint === sprintFilter)
+  }
+  const matches = (t: Task) => sprintOk(t) && (filter === 'all' || (filter === 'none' ? !t.release : t.release === filter))
+  const keep = (t: Task): boolean => matches(t) || (t.subtasks || []).some(keep)
+  const filtering = filter !== 'all' || sprintFilter !== 'all'
+
+  const row = (item: MapNode & Partial<Task>, kind: Kind) => {
+    const issue = kind === 'task' ? issueOf(board, item.id) : null
+    const tip = issue ? [issue.status, issue.size && `size ${issue.size}`, issue.assignees.length ? `@${issue.assignees.join(', @')}` : ''].filter(Boolean).join(', ') : ''
+    return (
+      <div
+        class={`${styles.row} ${selected === item.id ? styles.rowSelected : ''}`}
+        tabIndex={0}
+        onMouseEnter={() => focus(item.id, false)}
+        onClick={() => open(item.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            open(item.id)
+          }
+        }}
+      >
+        <span class={`${styles.dot} ${styles[kind]}`} />
+        <span class={styles.kind}>{KIND_LABEL[kind]}</span>
+        <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={item.title}>
+          {item.title}
+        </span>
+        {item.release ? <span class={`${styles.pill} ${styles.pillMilestone}`}>{item.release}</span> : null}
+        {issue && issue.sprint ? <span class={`${styles.pill} ${styles.pillSprint}`} title={tip}>{issue.sprint}</span> : null}
+        {kind !== 'step' && kind !== 'note' ? <Badge board={board} id={item.id} onOpen={() => open(item.id)} /> : null}
+      </div>
+    )
+  }
+
+  const taskTree = (t: Task): h.JSX.Element => {
+    const subs = (t.subtasks || []).filter(keep)
+    return (
+      <li key={t.id}>
+        {row(t, 'task')}
+        {subs.length ? <ul>{subs.map(taskTree)}</ul> : null}
+      </li>
+    )
+  }
+
+  const featureTree = (f: Feature) => {
+    const tasks = f.tasks.filter(keep)
+    if (filtering && !tasks.length) return null
+    return (
+      <li key={f.id}>
+        {row(f, 'feature')}
+        {f.steps.length ? <div class={styles.steps}>Steps: {f.steps.map((s) => s.title).join(' · ')}</div> : null}
+        {tasks.length ? <ul>{tasks.map(taskTree)}</ul> : null}
+      </li>
+    )
+  }
+
+  // The card of the selected sticky ---------------------------------------
+  const card = () => {
+    if (!selected) return null
+    const found = locate(board, selected)
+    if (!found) {
+      return (
+        <div class={styles.card}>
+          <div class={styles.cardHead}>
+            <span class={styles.cardTitle}>Not part of the map</span>
+            <button class={styles.close} onClick={() => setSelected(null)} aria-label="Close">✕</button>
+          </div>
+          <p class={styles.help}>This node is a label, a legend sticky, or a colour or row the map ignores. Change that in Legend.</p>
+        </div>
+      )
+    }
+    const { item, kind, parent } = found
+    const issue = issueOf(board, item.id)
+    const m = board.matches[item.id]
+    const linkTo = (n: number | null) => emit<LinkHandler>('LINK', item.id, n)
+    const canLink = kind !== 'step' && kind !== 'note'
+    const candidates = canLink && board.issues.length ? suggestIssues(item.title, kind, board.issues.map((i) => ({ number: i.number, title: i.title }))) : []
+    const searched = search.trim()
+      ? board.issues.filter((i) => `#${i.number} ${i.title}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 8)
+      : []
+    return (
+      <div class={styles.card}>
+        <div class={styles.cardHead}>
+          <span class={`${styles.dot} ${styles[kind]}`} />
+          <span class={styles.cardTitle}>{item.title}</span>
+          <button class={styles.close} onClick={() => setSelected(null)} aria-label="Close">✕</button>
+        </div>
+        <div class={styles.cardMeta}>
+          {KIND_LABEL[kind]}
+          {parent ? ` in ${parent}` : ''}
+          {item.release ? ` · ${item.release}` : ''}
+        </div>
+        {!canLink ? <p class={styles.help}>{kind === 'step' ? 'Steps are written in their feature, not as issues.' : 'Notes stay on the board, not on GitHub.'}</p> : null}
+        {canLink && !board.issues.length ? (
+          <p class={styles.help}>
+            Connect a repository in <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button> to see this sticky's issue.
+          </p>
+        ) : null}
+        {canLink && issue ? (
+          <div class={styles.cardIssue}>
+            <button class={styles.linkButton} onClick={() => issue.url && emit<OpenHandler>('OPEN', issue.url)}>
+              #{issue.number} {issue.title}
+            </button>
+            <div class={styles.cardMeta}>
+              {[issue.state === 'closed' ? 'Closed' : issue.status || 'Open', issue.sprint, issue.size && `size ${issue.size}`, issue.assignees.length ? `@${issue.assignees.join(', @')}` : 'no one assigned']
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+            <div class={styles.actions}>
+              <Button secondary onClick={() => linkTo(0)}>Not this issue</Button>
+            </div>
+          </div>
+        ) : null}
+        {canLink && !issue && board.issues.length ? (
+          <Fragment>
+            <p class={styles.help}>{m && m.confirmed ? 'Marked as not on GitHub yet.' : 'Is it one of these issues?'}</p>
+            {candidates.map((c) => (
+              <button key={c.number} class={styles.candidate} onClick={() => linkTo(c.number)}>
+                #{c.number} {c.title}
+                <span class={styles.candidateWhy}>{c.score > 1 ? 'Same title' : `Words in common: ${sharedWords(c.title, c.shared)}`}</span>
+              </button>
+            ))}
+            {!candidates.length ? <p class={styles.help}>No issue has a close title.</p> : null}
+            <SearchTextbox value={search} onValueInput={setSearch} placeholder="Search another issue" />
+            {searched.map((i) => (
+              <button key={i.number} class={styles.candidate} onClick={() => linkTo(i.number)}>
+                #{i.number} {i.title}
+              </button>
+            ))}
+            <div class={styles.actions}>
+              {!(m && m.confirmed) ? <Button secondary onClick={() => linkTo(0)}>Not on GitHub yet</Button> : null}
+              {m && (m.status === 'linked' || m.confirmed) ? <Button secondary onClick={() => linkTo(null)}>Guess from the title</Button> : null}
+            </div>
+          </Fragment>
+        ) : null}
+      </div>
+    )
+  }
+
+  // Tabs ------------------------------------------------------------------
+  const preview = () => {
+    const total = b.stats.epics + b.stats.features + b.stats.tasks
+    if (!total) {
+      return (
+        <div class={styles.empty}>
+          <p><b>No story map found here</b></p>
+          <p>Open the page that holds the story map, then press Refresh. Check Legend if the board uses other colours or rows.</p>
+        </div>
+      )
+    }
+    const releases = ['all', ...b.milestones, ...(b.stats.withoutMilestone ? ['none'] : [])]
+    return (
+      <Fragment>
+        {card()}
+        {board.issues.length ? (
+          <div style={{ margin: '8px 0' }}>
+            <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>
+              Labels on the board
+            </Toggle>
+          </div>
+        ) : null}
+        <div class={styles.summary}>
+          <div class={styles.stat}><span class={styles.statValue}>{b.stats.epics}</span><span class={styles.statLabel}>epics</span></div>
+          <div class={styles.stat}><span class={styles.statValue}>{b.stats.features}</span><span class={styles.statLabel}>features</span></div>
+          <div class={styles.stat}><span class={styles.statValue}>{b.stats.tasks}</span><span class={styles.statLabel}>tasks</span></div>
+          <div class={styles.stat}><span class={styles.statValue}>{b.milestones.length}</span><span class={styles.statLabel}>milestones</span></div>
+        </div>
+        {b.unmapped.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.unmapped.length} colour(s) not in the legend. Map them in Legend.</div> : null}
+        {b.orphans.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.orphans.length} item(s) have no parent column. They are listed at the bottom.</div> : null}
+        {b.milestones.length ? (
+          <div class={styles.chips}>
+            {releases.map((r) => (
+              <button key={r} class={`${styles.chip} ${filter === r ? styles.chipOn : ''}`} onClick={() => setFilter(r)}>
+                {r === 'all' ? 'All' : r === 'none' ? 'No milestone' : r}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {board.sprints.length ? (
+          <div class={styles.chips}>
+            {['all', ...board.sprints.map((s) => s.title), 'none'].map((s) => {
+              const sprint = board.sprints.find((x) => x.title === s)
+              return (
+                <button key={s} class={`${styles.chip} ${sprintFilter === s ? styles.chipOn : ''}`} title={sprint ? `${sprint.start} to ${sprint.end}` : ''} onClick={() => setSprintFilter(s)}>
+                  {s === 'all' ? 'All sprints' : s === 'none' ? 'Not in a sprint' : s}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+        <ul class={styles.tree}>
+          {b.epics.map((e) => {
+            const inner = [...e.features.map(featureTree).filter(Boolean), ...e.tasks.filter(keep).map(taskTree)]
+            if (filtering && !inner.length) return null
+            return (
+              <li key={e.id}>
+                {row(e, 'epic')}
+                {inner.length ? <ul>{inner}</ul> : null}
+              </li>
+            )
+          })}
+          {b.looseFeatures.map(featureTree)}
+        </ul>
+        {b.notes.length ? (
+          <Fragment>
+            <p class={styles.sectionTitle}>Notes, not issues</p>
+            <ul class={styles.tree}>{b.notes.map((n) => <li key={n.id}>{row(n, 'note')}</li>)}</ul>
+          </Fragment>
+        ) : null}
+        {b.orphans.length ? (
+          <Fragment>
+            <p class={styles.sectionTitle}>Without a parent</p>
+            <ul class={styles.tree}>{b.orphans.map((o) => <li key={o.id}>{row(o, (o.kind as Kind) || 'task')}</li>)}</ul>
+          </Fragment>
+        ) : null}
+      </Fragment>
+    )
+  }
+
+  const drift = () => {
+    const d = board.drift
+    if (!d) {
+      return (
+        <div class={styles.empty}>
+          <p><b>Compare with a repository first</b></p>
+          <p>Open GitHub, name the repository and press Compare.</p>
+        </div>
+      )
+    }
+    return (
+      <Fragment>
+        {d.drifts.length ? (
+          <p class={styles.help}>{d.drifts.length} place(s) where the map and GitHub disagree. Nothing is changed: decide with the team which side is right.</p>
+        ) : (
+          <div class={`${styles.notice} ${styles.ok}`}>The linked stickies and their issues agree.</div>
+        )}
+        {d.drifts.map((x) => {
+          const key = `${x.id}:${x.kind}:${x.number}`
+          const w = why[key]
+          return (
+            <div class={styles.drift} key={key}>
+              <div class={styles.driftHead}>
+                <span class={`${styles.pill} ${styles.pillMaybe}`}>{DRIFT_LABEL[x.kind]}</span>
+                <button class={`${styles.linkButton} ${styles.label}`} onClick={() => open(x.id)}>{x.title}</button>
+                <button class={styles.linkButton} onClick={() => x.url && emit<OpenHandler>('OPEN', x.url)}>#{x.number}</button>
+              </div>
+              <div class={styles.driftSides}>
+                <span class={styles.driftSide}>Map</span><span>{x.board}</span>
+                <span class={styles.driftSide}>GitHub</span><span>{x.github}</span>
+              </div>
+              {!w ? (
+                <Button
+                  secondary
+                  onClick={() => {
+                    setWhy((all) => ({ ...all, [key]: { loading: true } }))
+                    emit<WhyHandler>('WHY', key, x.number, x.kind)
+                  }}
+                >
+                  Why?
+                </Button>
+              ) : w.loading ? (
+                <p class={styles.help}>Reading the history…</p>
+              ) : w.error ? (
+                <p class={styles.help}>{w.error}</p>
+              ) : w.lines && w.lines.length ? (
+                <ul class={styles.history}>{w.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+              ) : (
+                <p class={styles.help}>No change recorded on GitHub: it has differed since the issue was written.</p>
+              )}
+            </div>
+          )
+        })}
+        {d.toConfirm.length ? <p class={styles.help}>{d.toConfirm.length} possible match(es) to confirm from their card.</p> : null}
+        {d.onlyOnBoard.length ? <p class={styles.help}>{d.onlyOnBoard.length} item(s) on the map have no issue linked.</p> : null}
+        {d.onlyOnGitHub.length ? (
+          <Fragment>
+            <p class={styles.sectionTitle}>Open issues not on the map</p>
+            {d.onlyOnGitHub.map((i) => (
+              <div class={styles.row} key={i.number} onClick={() => i.url && emit<OpenHandler>('OPEN', i.url)}>
+                <span class={styles.label}>#{i.number} {i.title}</span>
+                {i.milestone ? <span class={`${styles.pill} ${styles.pillMilestone}`}>{i.milestone}</span> : null}
+              </div>
+            ))}
+          </Fragment>
+        ) : null}
+      </Fragment>
+    )
+  }
+
+  const legend = () => {
+    const byRows = b.mode === 'rows'
+    const types = Object.entries(board.nodeTypes).sort((x, y) => y[1] - x[1]).map(([t, c]) => `${c} ${t.toLowerCase().replace(/_/g, ' ')}`).join(', ')
+    return (
+      <Fragment>
+        <div style={{ margin: '12px 0 8px' }}>
+          <SegmentedControl
+            value={board.settings.mode}
+            onValueChange={(v: string) => emit<SetModeHandler>('SET_MODE', v as BoardPayload['settings']['mode'])}
+            options={[{ value: 'auto', children: 'Automatic' }, { value: 'rows', children: 'By rows' }, { value: 'colours', children: 'By colours' }]}
+          />
+        </div>
+        <p class={styles.help}>
+          {byRows
+            ? "Read by rows, as in Figma's story map template: each labelled row gives the kind of the stickies in it. Release rows become milestones."
+            : 'Read by colours: each sticky colour gives one kind of item.'}
+          {board.settings.mode === 'auto' ? ' Chosen automatically.' : ''}
+        </p>
+        {byRows
+          ? b.rows.map((r) => (
+              <div class={styles.legendRow} key={r.name}>
+                <span class={`${styles.swatch} ${styles.rowMark}`}>{r.kind === 'release' ? 'R' : r.name.slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <div>{r.name}</div>
+                  <div class={styles.samples}>{r.count} {r.count === 1 ? 'sticky' : 'stickies'}{r.kind === 'release' ? ', milestone' : ''}</div>
+                </div>
+                <Dropdown value={r.type} options={TYPE_OPTIONS} onValueChange={(v: string) => emit<SetRowTypeHandler>('SET_ROW_TYPE', r.name, v as ItemType)} />
+              </div>
+            ))
+          : board.palette.map((c) => (
+              <div class={styles.legendRow} key={c.hex}>
+                <span class={styles.swatch} style={{ background: c.hex }} />
+                <div>
+                  <div>{c.count} {c.hue} {c.count > 1 ? 'stickies' : 'sticky'}</div>
+                  <div class={styles.samples} title={c.samples.join(' · ')}>{c.samples.join(' · ')}</div>
+                </div>
+                <Dropdown value={board.legend[c.hex] || 'ignore'} options={TYPE_OPTIONS} onValueChange={(v: string) => emit<SetLegendHandler>('SET_LEGEND', c.hex, v as ItemType)} />
+              </div>
+            ))}
+        <p class={styles.help}>
+          Read on this page: {types || 'nothing'}. {b.stats.ignored} stickies skipped (legend, labels, empty or ignored).
+        </p>
+      </Fragment>
+    )
+  }
+
+  const github = () => (
+    <Fragment>
+      <div style={{ height: 12 }} />
+      {status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
+      <div class={styles.field}>
+        <span class={styles.fieldLabel}>Repository</span>
+        <Textbox value={repo} onValueInput={setRepo} placeholder="owner/name" spellCheck={false} />
+      </div>
+      <div class={styles.field}>
+        <span class={styles.fieldLabel}>Project board, for sprints (optional)</span>
+        <Textbox value={project} onValueInput={setProject} placeholder="https://github.com/orgs/owner/projects/12" spellCheck={false} />
+      </div>
+      <div class={styles.field}>
+        <span class={styles.fieldLabel}>Token (optional)</span>
+        <Textbox value={token} onValueInput={setToken} password placeholder={board.settings.hasToken ? 'Saved on this computer' : 'Needed for sprints or a private repository'} />
+      </div>
+      <p class={styles.help}>Read only. Sprints need a token that can read projects (classic token: read:project, and repo for a private repository). It stays on this computer.</p>
+      <div class={styles.actions}>
+        <Button
+          onClick={() => {
+            emit<CompareHandler>('COMPARE', repo, project, token)
+            setToken('')
+          }}
+        >
+          Compare with issues
+        </Button>
+        {board.settings.hasToken ? <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Forget token</Button> : null}
+      </div>
+    </Fragment>
+  )
+
+  const tabContent: Record<string, () => h.JSX.Element> = { Preview: preview, Drift: drift, Legend: legend, GitHub: github }
+
+  return (
+    <div class={styles.app}>
+      <div class={styles.header}>
+        <div class={styles.titleRow}>
+          <span class={styles.title}>Storymap to GitHub</span>
+          <Button secondary onClick={() => emit<RefreshHandler>('REFRESH')}>Refresh</Button>
+        </div>
+        <div class={styles.scope}>
+          Reading page <b>{board.page}</b>
+          {board.settings.issuesLoaded !== null ? ` · compared with ${board.settings.issuesLoaded} issues of ${board.settings.repo}` : ''}
+        </div>
+      </div>
+      <Tabs
+        value={tab}
+        onValueChange={setTab}
+        options={['Preview', 'Drift', 'Legend', 'GitHub'].map((name) => ({ value: name, children: null }))}
+      />
+      <div class={styles.main}>{tabContent[tab]()}</div>
+      <div class={styles.footer}>
+        <span class={styles.footerNote}>Nothing is written to GitHub.{board.labelsOn ? ' Labels on the board are on.' : ''}</span>
+        <Button
+          secondary
+          onClick={() => {
+            const area = document.createElement('textarea')
+            area.value = board.markdown
+            document.body.appendChild(area)
+            area.select()
+            const ok = document.execCommand('copy')
+            area.remove()
+            setCopied(ok ? 'Copied' : 'Copy failed')
+            setTimeout(() => setCopied(''), 1500)
+          }}
+        >
+          {copied || 'Copy Markdown'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export default render(Plugin)
