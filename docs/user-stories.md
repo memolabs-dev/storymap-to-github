@@ -13,10 +13,10 @@ Each story is checked in Figma on a copy of a board, against a test repository. 
 | 5 | see where the work stands: sprint, status, who is on it | I can answer "where are we?" without opening GitHub | Done, read only |
 | 6 | know where the map and GitHub disagree, and who changed what | the weekly starts from facts | Done: Differences and "Why?" |
 | 7 | rename the issue when the map is right | titles stay in the words of the map | Done: each difference offers "the map is right" (rename the issue, set its milestone, move it under its parent), "Rename the sticky" for a title, and "Keep both", which hides it until either side changes |
-| 8 | not change the tech lead's fields by mistake | each role keeps its fields | Not started (roles) |
+| 8 | not change the tech lead's fields by mistake | each role keeps its fields | Done: each person picks a role (product manager, tech lead, everyone) in the GitHub tab; the plugin only offers that role's changes and says who to ask for the others. The split is a team setting under More settings (default: the product manager creates issues, sets sizes, titles and milestones; the tech lead moves issues under a parent). A guard against mistakes, not a security boundary. To confirm at the weekly |
 | 9 | publish a batch of stickies after reviewing them | a new release becomes issues in one go | Done: Differences, "On the map only", tick the stickies (none ticked at first; "Tick the new ones" leaves out those that look like an existing issue), then "Create N issues", parents first |
 | 10 | see what moved since last week | the weekly is quick | Done: "Start the week now" in Differences saves a snapshot in the file; from then on the issues created, closed, reopened, or changed (title, milestone, status, sprint, size, assignees) show with before and after, for the whole team |
-| 11 | start a new map with a guided template | a new team gets going without help | Partly: the guide helps on an existing board; the template is not created |
+| 11 | start a new map with a guided template | a new team gets going without help | Done in code, tested by reading it back: on a page with no map, "Add a story map template" lays out Figma's rows (User Persona, Activities, Tasks, Release 1, Release 2) with an example sticky each, then the guide takes over. Not yet tried in Figma: the free plan allows one page per FigJam file |
 
 ## Acceptance criteria
 

@@ -33,6 +33,10 @@ In the GitHub tab, press **Connect with GitHub**: the plugin shows a short code,
 
 **Publishing a batch.** In Differences, "On the map only" lists the stickies with no issue, each with a box to tick. Nothing is ticked at first; "Tick the new ones" ticks every sticky that looks like no existing issue, and the ones marked `#19?` should be linked from their card instead. "Create N issues" creates them parents first, so a feature lands under its new epic and a sub-task under its new task, and reads GitHub once at the end.
 
+**Roles.** Each person picks a role in the GitHub tab: product manager, tech lead, or everyone. The plugin then only offers that role's changes, and says who to ask for the others. Who does what is a setting of the whole team, under More settings; by default the product manager creates issues and sets sizes, titles and milestones, and the tech lead moves issues under a parent. It keeps people from changing someone else's field by mistake; it is not a security boundary.
+
+**Starting a map.** On a page with no story map, "Add a story map template" lays out the rows of Figma's template (User Persona, Activities, Tasks, Release 1, Release 2) with an example sticky in each.
+
 **Labels on the board.** Once a repository is compared, the "Labels on the board" switch puts a small locked label in the corner of every linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves, are updated on every read, and all go away when the switch is turned off. Labels and links are written on the board only.
 
 ## Drift: where the map and GitHub disagree

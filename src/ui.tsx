@@ -24,9 +24,12 @@ import { emit, on } from '@create-figma-plugin/utilities'
 import { Fragment, h } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 
-import { DEFAULT_BODY, draftIssue, driftKey, normalize, suggestIssues } from './core'
-import type { Drift, Feature, ItemType, MapNode, Task } from './core'
+import { ACTIONS, DEFAULT_BODY, canDo, draftIssue, driftKey, normalize, suggestIssues } from './core'
+import type { Action, Drift, Feature, ItemType, MapNode, Role, Task } from './core'
 import type {
+  AddTemplateHandler,
+  SetOwnerHandler,
+  SetRoleHandler,
   AuthHandler,
   AuthPayload,
   CancelSignInHandler,
@@ -73,6 +76,12 @@ type Kind = 'epic' | 'feature' | 'step' | 'task' | 'note'
 
 const KIND_LABEL: Record<string, string> = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'Note', ignore: 'Ignore' }
 const TYPE_OPTIONS = (['epic', 'feature', 'step', 'task', 'note', 'ignore'] as Array<ItemType>).map((value) => ({ value, text: KIND_LABEL[value] }))
+const ROLE_NAME: Record<Role, string> = { pm: 'the product manager', techlead: 'the tech lead', both: 'everyone' }
+const ROLE_OPTIONS = [
+  { value: 'pm', text: 'Product manager' },
+  { value: 'techlead', text: 'Tech lead' },
+  { value: 'both', text: 'Everyone' },
+]
 const TAB_NAMES = ['Map', 'Differences', 'Reading', 'GitHub']
 const DRIFT_LABEL: Record<Drift['kind'], string> = { dropped: 'Dropped on GitHub', schedule: 'Planned too late', milestone: 'Milestone', parent: 'Parent', title: 'Title' }
 
@@ -316,6 +325,9 @@ function Plugin() {
   if (!board) return <div class={styles.empty}>Reading the board…</div>
 
   const b = board.backlog
+  // Whether this person's role makes this change; if not, who to ask.
+  const may = (action: Action) => canDo(board.settings.role, action, board.settings.owners)
+  const askFor = (action: Action) => <span class={styles.help}>This change is for {ROLE_NAME[board.settings.owners[action]]}.</span>
   const focus = (id: string, zoom: boolean) => emit<FocusHandler>('FOCUS', id, zoom)
   const open = (id: string) => {
     setSelected(id)
@@ -439,7 +451,7 @@ function Plugin() {
             {board.settings.sizeOptions ? (
               <div class={styles.sizeRow}>
                 <span class={styles.fieldLabel}>Size</span>
-                {board.settings.writeAllowed ? (
+                {board.settings.writeAllowed && may('size') ? (
                   <SegmentedControl
                     value={issue.size || 'none'}
                     options={[{ value: 'none', children: 'None' }, ...board.settings.sizeOptions.map((o) => ({ value: o, children: o }))]}
@@ -449,7 +461,10 @@ function Plugin() {
                     }}
                   />
                 ) : (
-                  <span>{issue.size || 'No size'}</span>
+                  <span>
+                    {issue.size || 'No size'}
+                    {board.settings.writeAllowed ? <span class={styles.help}> · set by {ROLE_NAME[board.settings.owners.size]}</span> : null}
+                  </span>
                 )}
               </div>
             ) : null}
@@ -522,7 +537,9 @@ function Plugin() {
         {draft.warnings.map((w) => (
           <div key={w} class={`${styles.notice} ${styles.warn}`}>{w}</div>
         ))}
-        {writeAllowed ? (
+        {writeAllowed && !may('create') ? (
+          askFor('create')
+        ) : writeAllowed ? (
           <div class={styles.actions}>
             <Button
               disabled={busy || !title.trim()}
@@ -549,8 +566,11 @@ function Plugin() {
     if (!total) {
       return (
         <div class={styles.empty}>
-          <p><b>No story map found here</b></p>
-          <p>Open the page that holds the story map, then press Refresh. Check Legend if the board uses other colours or rows.</p>
+          <p><b>No story map on this page</b></p>
+          <p>Start one from a template, laid out like Figma's story map: a row for the persona, the activities, the tasks and two releases. Or open the page that holds your map; check Reading if it uses other colours or rows.</p>
+          <div class={styles.actions} style={{ justifyContent: 'center' }}>
+            <Button onClick={() => emit<AddTemplateHandler>('ADD_TEMPLATE')}>Add a story map template</Button>
+          </div>
         </div>
       )
     }
@@ -654,9 +674,12 @@ function Plugin() {
       parent: `Move under #${x.target}`,
     }
     const canFix = x.kind in mapLabel
+    const action = (x.kind === 'parent' ? 'parent' : x.kind === 'milestone' ? 'milestone' : 'title') as Action
     return (
       <div class={styles.settle}>
-        {canFix ? (
+        {canFix && !may(action) ? (
+          askFor(action)
+        ) : canFix ? (
           board.settings.writeAllowed ? (
             <Button onClick={() => go('map')} title="The map is right: change GitHub">
               {mapLabel[x.kind]}
@@ -665,7 +688,7 @@ function Plugin() {
             <span class={styles.help}>To change GitHub from here, choose Can write in GitHub.</span>
           )
         ) : null}
-        {x.kind === 'title' ? (
+        {x.kind === 'title' && may('title') ? (
           <Button secondary onClick={() => go('github')} title="GitHub is right: change the sticky">
             Rename the sticky
           </Button>
@@ -695,7 +718,7 @@ function Plugin() {
       return (
         <div class={styles.row} key={i.id} onMouseEnter={() => focus(i.id, false)}>
           <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
-          {s.writeAllowed && publishable.includes(i) ? (
+          {s.writeAllowed && may('create') && publishable.includes(i) ? (
             <span class={styles.label}>
               <Checkbox value={ticked(i)} onValueChange={(v: boolean) => setPicked((p) => ({ ...p, [i.id]: v }))}>
                 {i.title}
@@ -712,10 +735,10 @@ function Plugin() {
         </div>
       )
     }
-    if (!s.writeAllowed) {
+    if (!s.writeAllowed || !may('create')) {
       return (
         <Fragment>
-          <p class={styles.help}>To create these as issues in one go, choose Can write in GitHub.</p>
+          {s.writeAllowed ? <p>{askFor('create')}</p> : <p class={styles.help}>To create these as issues in one go, choose Can write in GitHub.</p>}
           {items.map(row)}
         </Fragment>
       )
@@ -977,7 +1000,7 @@ function Plugin() {
           ) : null}
           {signedIn ? (
             <p class={styles.help}>
-              The plugin can read and change issues in the repositories your account can reach; it only writes where you choose "Create issues". Signing out forgets the token here; revoke it on{' '}
+              The plugin can read and change issues in the repositories your account can reach; it only writes where you choose "Can write". Signing out forgets the token here; revoke it on{' '}
               <button class={styles.linkButton} onClick={() => emit<OpenHandler>('OPEN', 'https://github.com/settings/applications')}>GitHub</button>.
             </p>
           ) : auth.state === 'code' ? (
@@ -1092,7 +1115,14 @@ function Plugin() {
     const save = (change: { startLabel?: string; startStatus?: string; bodyTemplate?: string }) => emit<SetPublishingHandler>('SET_PUBLISHING', change)
     return (
       <div class={styles.publish}>
-        <span class={styles.stepTitle}>4. What the plugin may do in {repoName}</span>
+        <span class={styles.stepTitle}>4. Your role</span>
+        <SegmentedControl
+          value={board.settings.role}
+          options={ROLE_OPTIONS.map((o) => ({ value: o.value, children: o.text }))}
+          onValueChange={(v: string) => emit<SetRoleHandler>('SET_ROLE', v as Role)}
+        />
+        <p class={styles.help}>The plugin only offers the changes of your role, so nobody changes someone else's field by mistake. Who does what is under More settings.</p>
+        <span class={styles.stepTitle} style={{ marginTop: 12 }}>5. What the plugin may do in {repoName}</span>
         <SegmentedControl
           value={writeAllowed ? 'write' : 'read'}
           options={[{ value: 'read', children: 'Read only' }, { value: 'write', children: 'Can write' }]}
@@ -1100,12 +1130,19 @@ function Plugin() {
         />
         <p class={styles.help}>
           {writeAllowed
-            ? "From a sticky's card you can create its issue, after a preview, and set its size on the board. Nothing else is changed."
+            ? 'The plugin can create issues, set sizes and settle differences, each after you click, and only the changes of your role.'
             : 'The plugin only reads GitHub. This is the default for every repository.'}
         </p>
         {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>Your account cannot write to {repoName}: creating issues will fail.</div> : null}
         <details class={styles.more}>
           <summary>More settings</summary>
+          <span class={styles.fieldLabel}>Who does what, for the whole team</span>
+          {(Object.keys(ACTIONS) as Array<Action>).map((a) => (
+            <div class={styles.ownerRow} key={a}>
+              <span>{ACTIONS[a]}</span>
+              <Dropdown value={board.settings.owners[a]} options={ROLE_OPTIONS} onValueChange={(v: string) => emit<SetOwnerHandler>('SET_OWNER', a, v as Role)} />
+            </div>
+          ))}
         <div class={styles.field}>
           <span class={styles.fieldLabel}>Label of a new issue (empty for none)</span>
           <Textbox

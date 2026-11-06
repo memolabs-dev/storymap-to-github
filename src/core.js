@@ -886,7 +886,52 @@ function changesSince(snapshot, issues) {
   return moved.sort((a, b) => order[a.kind] - order[b.kind] || b.number - a.number);
 }
 
+// Roles: who makes which change from the plugin. A guard against changing
+// someone else's field by mistake, not a security boundary. Each team can
+// change the split, per repository; 'both' is open to everyone.
+const ACTIONS = {
+  create: 'Create issues',
+  size: 'Set sizes',
+  title: 'Rename issues',
+  milestone: 'Set milestones',
+  parent: 'Move under a parent',
+};
+const DEFAULT_OWNERS = { create: 'pm', size: 'pm', title: 'pm', milestone: 'pm', parent: 'techlead' };
+
+function canDo(role, action, owners = {}) {
+  if (!role || role === 'both') return true;
+  const owner = owners[action] || DEFAULT_OWNERS[action] || 'both';
+  return owner === 'both' || owner === role;
+}
+
+// A starting story map, laid out like Figma's template: one labelled row
+// each for the persona, the activities, the tasks and two releases, with an
+// example sticky in each. Positions are relative to the top left corner.
+const STICKY = 240;
+const GAP = 60;
+const STARTER_ROWS = [
+  { label: 'User Persona', text: 'Who uses the product, and what they need', fill: { r: 0.85, g: 0.78, b: 1 } },
+  { label: 'Activities', text: 'An activity: something the persona does', fill: { r: 0.6, g: 0.8, b: 1 } },
+  { label: 'Tasks', text: 'A task within that activity', fill: { r: 1, g: 0.7, b: 0.7 } },
+  { label: 'Release 1', text: 'A first story to build', fill: { r: 1, g: 0.86, b: 0.5 } },
+  { label: 'Release 2', text: 'A story for later', fill: { r: 1, g: 0.86, b: 0.5 } },
+];
+
+function starterLayout() {
+  const shapes = [];
+  STARTER_ROWS.forEach((row, i) => {
+    const y = i * (STICKY + GAP);
+    shapes.push({ kind: 'label', text: row.label, x: 0, y, w: 120, h: STICKY, fill: { r: 0.95, g: 0.95, b: 0.95 } });
+    shapes.push({ kind: 'sticky', text: row.text, x: 120 + GAP, y, w: STICKY, h: STICKY, fill: row.fill });
+  });
+  return shapes;
+}
+
 export {
+  ACTIONS,
+  DEFAULT_OWNERS,
+  canDo,
+  starterLayout,
   DEFAULT_BODY,
   snapshotOf,
   changesSince,

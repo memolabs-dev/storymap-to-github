@@ -7,7 +7,10 @@ import {
   LEGEND_PATTERN,
   buildBacklog,
   buildPalette,
+  DEFAULT_OWNERS,
+  canDo,
   changesSince,
+  starterLayout,
   defaultLegend,
   draftIssue,
   snapshotOf,
@@ -23,8 +26,11 @@ import {
   readProject,
   toMarkdown,
 } from './core'
-import type { Backlog, BoardItem, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
+import type { Action, Backlog, BoardItem, Role, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
 import type {
+  AddTemplateHandler,
+  SetOwnerHandler,
+  SetRoleHandler,
   AuthHandler,
   AuthPayload,
   CancelSignInHandler,
@@ -78,6 +84,7 @@ interface State {
   project: string
   token: string
   login: string | null
+  role: Role
   sprints: Array<Sprint>
   board: ProjectBoard | null
   mode: ReadingMode
@@ -107,6 +114,7 @@ const state: State = {
   project: '',
   token: '',
   login: null,
+  role: 'both',
   sprints: [],
   board: null,
   mode: 'auto',
@@ -218,6 +226,56 @@ function writeLink(id: string, number: number | null) {
   else state.links[id] = number
 }
 
+// Who makes which change, shared by the team in the file, per repository.
+const ownersKey = () => `owners:${state.repo.toLowerCase()}`
+
+function owners(): Record<Action, Role> {
+  const saved = state.repo && figma.root.getPluginData(ownersKey())
+  return { ...DEFAULT_OWNERS, ...(saved ? (JSON.parse(saved) as Partial<Record<Action, Role>>) : {}) }
+}
+
+function mustBeAllowed(action: Action) {
+  if (canDo(state.role, action, owners())) return
+  const who = owners()[action] === 'pm' ? 'the product manager' : 'the tech lead'
+  throw new Error(`On this board, that change is for ${who}. Change your role or the split in the GitHub tab.`)
+}
+
+// A starting story map on an empty page, laid out like Figma's template.
+async function addTemplate() {
+  const center = figma.viewport.center
+  const shapes = starterLayout()
+  const width = Math.max(...shapes.map((s) => s.x + s.w))
+  const height = Math.max(...shapes.map((s) => s.y + s.h))
+  const made: Array<SceneNode> = []
+  for (const shape of shapes) {
+    const x = center.x - width / 2 + shape.x
+    const y = center.y - height / 2 + shape.y
+    if (shape.kind === 'label') {
+      const label = figma.createShapeWithText()
+      label.shapeType = 'ROUNDED_RECTANGLE'
+      label.resize(shape.w, shape.h)
+      label.fills = [{ type: 'SOLID', color: shape.fill }]
+      await figma.loadFontAsync(label.text.fontName as FontName)
+      label.text.characters = shape.text
+      label.x = x
+      label.y = y
+      made.push(label)
+    } else {
+      const sticky = figma.createSticky()
+      await figma.loadFontAsync(sticky.text.fontName as FontName)
+      sticky.text.characters = shape.text
+      sticky.fills = [{ type: 'SOLID', color: shape.fill }]
+      sticky.x = x
+      sticky.y = y
+      made.push(sticky)
+    }
+  }
+  figma.currentPage.selection = made
+  figma.viewport.scrollAndZoomIntoView(made)
+  readBoard()
+  publish()
+}
+
 // The start of the week: a snapshot of the issues, kept in the file per
 // repository so the whole team compares against the same moment.
 const weekKey = () => `week:${state.repo.toLowerCase()}`
@@ -267,6 +325,7 @@ async function resolve(id: string, key: string, side: 'map' | 'github' | 'keep')
     emit<StatusHandler>('STATUS', { state: 'ok', text: `Kept as it is: #${drift.number} will not show here again unless it changes.` })
     return
   }
+  mustBeAllowed(drift.kind === 'parent' ? 'parent' : drift.kind === 'milestone' ? 'milestone' : 'title')
   if (side === 'github') {
     if (drift.kind !== 'title' || !node) throw new Error('Only a title can be taken from GitHub onto the map.')
     const issue = state.issues.find((i) => i.number === drift.number)
@@ -340,6 +399,7 @@ async function loadSettings() {
   state.project = (await figma.clientStorage.getAsync(fileKey('project'))) || ''
   state.token = (await figma.clientStorage.getAsync('token')) || ''
   state.login = (await figma.clientStorage.getAsync('login')) || null
+  state.role = (await figma.clientStorage.getAsync('role')) || 'both'
   await moveOldLinks()
   readLinks()
   const reading = (await figma.clientStorage.getAsync(fileKey('reading'))) || {}
@@ -413,6 +473,8 @@ function publish() {
       issuesLoaded: state.issues ? state.issues.length : null,
       meta: state.meta,
       writeAllowed: state.writeAllowed,
+      role: state.role,
+      owners: owners(),
       sizeOptions: state.board && state.board.sizeField ? state.board.sizeField.options.map((o) => o.name) : null,
       publishing: state.publishing,
     },
@@ -558,6 +620,7 @@ async function addToProject(nodeId: string, status: string | null): Promise<stri
 // Sets the size of an issue on the project board, the product manager's
 // field. The issue is added to the board first if it is not on it yet.
 async function setSize(number: number, size: string | null) {
+  mustBeAllowed('size')
   if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
   const board = state.board
   if (!board || !board.id || !board.sizeField) throw new Error('The project board has no size field.')
@@ -599,6 +662,7 @@ async function setSize(number: number, size: string | null) {
 // the project board, then the link on the sticky. Only when the team allowed
 // writing to this repository.
 async function createIssue(id: string, title: string, text: string): Promise<{ issue: Issue; note: string; problems: Array<string> }> {
+  mustBeAllowed('create')
   if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
   if (!state.token) throw new Error('Publishing needs a token that can write issues.')
   if (!state.backlog || !state.meta) throw new Error('Compare with GitHub first.')
@@ -1095,6 +1159,21 @@ export default function () {
     if (!state.repo) return
     state.publishing = { ...state.publishing, ...change }
     void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
+  })
+
+  on<SetRoleHandler>('SET_ROLE', (role) => {
+    state.role = role
+    void figma.clientStorage.setAsync('role', role).then(publish).catch(fail)
+  })
+
+  on<SetOwnerHandler>('SET_OWNER', (action, role) => {
+    if (!state.repo) return
+    figma.root.setPluginData(ownersKey(), JSON.stringify({ ...owners(), [action]: role }))
+    publish()
+  })
+
+  on<AddTemplateHandler>('ADD_TEMPLATE', () => {
+    void addTemplate().catch(fail)
   })
 
   on<StartWeekHandler>('START_WEEK', () => {

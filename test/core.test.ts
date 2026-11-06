@@ -491,3 +491,27 @@ test('what moved since the week started: new, closed, and changed issues with be
   ]);
   assert.equal(core.changesSince(snapshot, before).length, 0, 'nothing moved');
 });
+
+test('each role does its own changes, and the split can be changed', () => {
+  assert.equal(core.canDo('pm', 'size'), true, 'sizes are the product manager\'s');
+  assert.equal(core.canDo('techlead', 'size'), false);
+  assert.equal(core.canDo('pm', 'parent'), false, 'the split is the tech lead\'s');
+  assert.equal(core.canDo('techlead', 'parent'), true);
+  assert.equal(core.canDo('both', 'parent'), true, 'someone with both roles does everything');
+  assert.equal(core.canDo('techlead', 'size', { size: 'both' }), true, 'a team can share a field');
+  assert.equal(core.canDo('pm', 'unknown'), true, 'an action nobody owns is open to all');
+});
+
+test('the starting template is a story map the plugin reads by rows', () => {
+  const shapes = core.starterLayout();
+  n = 0;
+  const items = shapes.map((s) => ({ id: `n${(n += 1)}`, type: s.kind === 'label' ? 'SHAPE_WITH_TEXT' : 'STICKY', text: s.text, fill: s.fill, x: s.x, y: s.y, w: s.w, h: s.h }));
+  const b = core.buildBacklog(items, {});
+  assert.equal(b.mode, 'rows');
+  assert.deepEqual(b.rows.map((r) => r.name), ['User Persona', 'Activities', 'Tasks', 'Release 1', 'Release 2']);
+  assert.equal(b.stats.epics, 1);
+  assert.equal(b.stats.features, 1);
+  assert.equal(b.stats.tasks, 2);
+  assert.deepEqual(b.milestones, ['Release 1', 'Release 2']);
+  assert.equal(b.notes.length, 1);
+});

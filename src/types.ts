@@ -2,7 +2,7 @@
 // typed style of Create Figma Plugin's `emit` and `on`.
 import { EventHandler } from '@create-figma-plugin/utilities'
 
-import type { Backlog, DriftReport, ItemType, Matches, Moved, PaletteEntry, Publishing, ReadingMode, RepoMeta, Sprint } from './core'
+import type { Action, Backlog, DriftReport, ItemType, Matches, Moved, Role, PaletteEntry, Publishing, ReadingMode, RepoMeta, Sprint } from './core'
 
 export interface IssueSummary {
   number: number
@@ -48,6 +48,9 @@ export interface BoardPayload {
     publishing: Publishing
     // The sizes the project board offers (its Size field), or null.
     sizeOptions: Array<string> | null
+    // This person's role, and who makes which change on this repository.
+    role: Role
+    owners: Record<Action, Role>
   }
 }
 
@@ -214,6 +217,18 @@ export interface PublishManyHandler extends EventHandler {
 }
 export interface StartWeekHandler extends EventHandler {
   name: 'START_WEEK'
+  handler: () => void
+}
+export interface SetRoleHandler extends EventHandler {
+  name: 'SET_ROLE'
+  handler: (role: Role) => void
+}
+export interface SetOwnerHandler extends EventHandler {
+  name: 'SET_OWNER'
+  handler: (action: Action, role: Role) => void
+}
+export interface AddTemplateHandler extends EventHandler {
+  name: 'ADD_TEMPLATE'
   handler: () => void
 }
 export interface ResizeWindowHandler extends EventHandler {

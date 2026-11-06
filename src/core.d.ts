@@ -219,6 +219,21 @@ export interface Moved {
 }
 export declare function snapshotOf(issues: Array<Issue>): Snapshot
 export declare function changesSince(snapshot: Snapshot, issues: Array<Issue>): Array<Moved>
+export type Role = 'pm' | 'techlead' | 'both'
+export type Action = 'create' | 'size' | 'title' | 'milestone' | 'parent'
+export declare const ACTIONS: Record<Action, string>
+export declare const DEFAULT_OWNERS: Record<Action, Role>
+export declare function canDo(role: Role | null, action: string, owners?: Partial<Record<Action, Role>>): boolean
+export interface StarterShape {
+  kind: 'label' | 'sticky'
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+  fill: RGB
+}
+export declare function starterLayout(): Array<StarterShape>
 export declare function publishOrder(backlog: Backlog, ids: Array<string>): Array<string>
 export declare function driftKey(drift: Drift): string
 export declare function findDrift(backlog: Backlog, issues: Array<Issue>, matches: Matches, kept?: Record<string, Array<string>>): DriftReport
