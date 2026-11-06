@@ -10,6 +10,13 @@ Product owners plan in FigJam, developers work in GitHub Issues and Projects, an
 
 ## How it reads a board
 
+Two conventions, chosen automatically and switchable in the Legend tab:
+
+- **By rows**, as in [Figma's story map template](https://www.figma.com/templates/story-map-example/): labelled rows give the kind of every sticky in them. By default User Persona becomes a note, Activities epics, Tasks features, and each Release row a milestone holding its tasks. Each row's meaning can be changed. Rows are picked automatically when the row labels are about as tall as a sticky, as in the template.
+- **By colours**, as many team boards do: each sticky colour gives the kind of item. The rules below apply.
+
+The plugin needs edit access to the file: Figma does not run plugins in view-only files.
+
 - **Colours.** By default, after Jeff Patton's story map: yellow epics, blue activities (features), green steps, violet tasks, pink notes for the product owners. The Legend tab lists every colour found and lets you change what each one means.
 - **Columns.** A feature belongs to the nearest epic at or left of it, a step to the nearest feature, a task to the column it overlaps most.
 - **Arrows.** An arrow between a task and a feature, step or epic sets the task's parent, whatever the column. An arrow between two tasks makes the lower one a sub-task.

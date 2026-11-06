@@ -272,6 +272,59 @@ test('a task planned in a sprint ending after its release is due drifts', () => 
   assert.equal(d.drifts[0].kind, 'schedule');
 });
 
+// The layout of Figma's official story map template: tall row labels on the
+// left, 240 px stickies in columns, a how-to text further left.
+function officialBoard() {
+  n = 0;
+  const shape = (text, y, fill) => ({ id: `r${(n += 1)}`, type: 'SHAPE_WITH_TEXT', text, fill, x: 272, y, w: 128, h: 349 });
+  const s = (text, fill, x, y) => sticky(text, fill, x, y, { w: 240, h: 240 });
+  return [
+    { id: 'howto', type: 'TEXT', text: 'Establish your user persona.', x: -400, y: 1547, w: 472, h: 32 },
+    shape('User Persona', 496, VIOLET),
+    shape('Activities', 938, BLUE),
+    shape('Tasks', 1381, PINK),
+    shape('Release 1', 1823, YELLOW),
+    shape('Release 2', 2265, YELLOW),
+    s('Librarian', VIOLET, 480, 535),
+    s('Find a book', BLUE, 480, 993),
+    s('Lend a book', BLUE, 760, 993),
+    s('Search the catalogue', PINK, 480, 1435),
+    s('Scan the card', PINK, 760, 1435),
+    s('Search by title', YELLOW, 480, 1856),
+    s('Due date reminder', YELLOW, 760, 1856),
+    s('Search by author', YELLOW, 480, 2320),
+    s('', YELLOW, 760, 2320),
+  ];
+}
+
+test("Figma's official template is read by rows, not by colours", () => {
+  const items = officialBoard();
+  const b = core.buildBacklog(items, core.defaultLegend(core.buildPalette(items)));
+  assert.equal(b.mode, 'rows');
+  assert.deepEqual(b.epics.map((e) => e.title), ['Find a book', 'Lend a book']);
+  assert.deepEqual(b.epics[0].features.map((f) => f.title), ['Search the catalogue']);
+  assert.deepEqual(b.epics[0].features[0].tasks.map((t) => [t.title, t.release]), [['Search by title', 'Release 1'], ['Search by author', 'Release 2']]);
+  assert.deepEqual(b.epics[1].features[0].tasks.map((t) => [t.title, t.release]), [['Due date reminder', 'Release 1']]);
+  assert.deepEqual(b.notes.map((x) => x.title), ['Librarian'], 'the persona is a note, not an issue');
+  assert.deepEqual(b.milestones, ['Release 1', 'Release 2']);
+  assert.deepEqual(b.rows.map((r) => [r.name, r.type, r.count]), [['User Persona', 'note', 1], ['Activities', 'epic', 2], ['Tasks', 'feature', 2], ['Release 1', 'task', 2], ['Release 2', 'task', 1]]);
+});
+
+test('the reading mode and the meaning of each row can be changed', () => {
+  const items = officialBoard();
+  const legend2 = core.defaultLegend(core.buildPalette(items));
+  assert.equal(core.buildBacklog(items, legend2, { mode: 'colours' }).mode, 'colours');
+  const b = core.buildBacklog(items, legend2, { rowTypes: { 'User Persona': 'ignore', Activities: 'feature', Tasks: 'step' } });
+  assert.equal(b.notes.length, 0);
+  assert.equal(b.epics.length, 0);
+  assert.deepEqual(b.looseFeatures.map((f) => [f.title, f.steps.map((x) => x.title)]), [['Find a book', ['Search the catalogue']], ['Lend a book', ['Scan the card']]]);
+});
+
+test('a small colour legend does not switch the board to rows', () => {
+  const items = [...board(), sticky('Activities', BLUE, -700, 300, { w: 80, h: 24 }), sticky('Tasks', VIOLET, -700, 900, { w: 80, h: 24 })];
+  assert.equal(core.buildBacklog(items, legend).mode, 'colours');
+});
+
 test('the Markdown draft lists the tree', () => {
   const md = core.toMarkdown(core.buildBacklog(board(), legend));
   assert.match(md, /## Epic: Catalogue/);

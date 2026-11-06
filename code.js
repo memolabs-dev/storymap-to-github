@@ -181,16 +181,87 @@ function releaseOf(item, releases) {
   return row ? row.name : null;
 }
 
+// Reading by rows, as in Figma's official story map template: labelled rows
+// (User Persona, Activities, Tasks, Release 1, Release 2…) give the kind of
+// every sticky in them, whatever its colour.
+const ROW_KINDS = [
+  { kind: 'persona', re: /^(user\s*)?personas?$/i },
+  { kind: 'activities', re: /^(user\s*)?(activit(y|ies)|backbone|epics?|themes?|goals?)$/i },
+  { kind: 'steps', re: /^steps?$/i },
+  { kind: 'tasks', re: /^(user\s*)?(tasks?|features?|walking\s*skeleton|narrative\s*flow)$/i },
+];
+const DEFAULT_ROW_TYPES = { persona: 'note', activities: 'epic', steps: 'step', tasks: 'feature', release: 'task' };
+
+function rowKindOf(label) {
+  if (RELEASE_PATTERN.test(label)) return 'release';
+  const found = ROW_KINDS.find((k) => k.re.test(label));
+  return found ? found.kind : null;
+}
+
+// The labelled rows of a board, top to bottom. A row runs from its label
+// down to the next label.
+function findRows(items) {
+  const rows = [];
+  for (const item of items) {
+    if (item.inLegend || (item.type !== 'STICKY' && item.type !== 'SHAPE_WITH_TEXT' && item.type !== 'TEXT')) continue;
+    const label = text(item);
+    if (!label || label.length > 30) continue;
+    const kind = rowKindOf(label);
+    if (kind) rows.push({ id: item.id, name: label, kind, x: item.x, y: item.y, w: item.w, h: item.h });
+  }
+  rows.sort((a, b) => a.y - b.y);
+  return rows;
+}
+
+// Rows are read automatically when the board has row labels for Activities
+// or Tasks that are at least about as tall as a sticky, as in Figma's
+// template. Small labels are usually a colour legend (as on many team
+// boards), so the colours are read instead; the Legend tab can force rows.
+function usesRows(rows, items) {
+  const heights = items.filter((i) => i.type === 'STICKY').map((i) => i.h).sort((a, b) => a - b);
+  const typical = heights.length ? heights[Math.floor(heights.length / 2)] : 0;
+  const lanes = rows.filter((r) => r.kind !== 'release' && r.h >= 0.8 * typical);
+  return lanes.some((r) => r.kind === 'activities' || r.kind === 'tasks');
+}
+
 // Turn the raw board items into the backlog tree.
 // items: [{ id, type, text, name, fill, x, y, w, h, inLegend }] and connectors
 //        [{ id, type: 'CONNECTOR', from, to }]
-// legend: { '#rrggbb': type }
-function buildBacklog(items, legend) {
+// legend: { '#rrggbb': type }, used when reading by colour
+// options: { mode: 'auto' | 'rows' | 'colours', rowTypes: { [row name]: type } }
+function buildBacklog(items, legend, options = {}) {
   const typed = { epic: [], feature: [], step: [], task: [], note: [] };
   let ignored = 0;
   const unmapped = new Set();
+  const rows = findRows(items);
+  const mode = options.mode === 'rows' || (options.mode !== 'colours' && usesRows(rows, items)) ? 'rows' : 'colours';
+  const rowTypes = options.rowTypes || {};
+  const typeOfRow = (row) => rowTypes[row.name] || DEFAULT_ROW_TYPES[row.kind];
+  const rowIds = new Set(rows.map((r) => r.id));
+  const left = rows.length ? Math.min(...rows.map((r) => r.x)) : -Infinity;
+  const rowAt = (y) => {
+    let found = null;
+    for (const r of rows) if (r.y <= y) found = r;
+    return found;
+  };
+  const rowCounts = {};
+
   for (const item of items) {
     if (item.type !== 'STICKY' && item.type !== 'SHAPE_WITH_TEXT') continue;
+    if (mode === 'rows') {
+      if (rowIds.has(item.id)) continue;
+      const c = center(item);
+      const row = c.x > left ? rowAt(c.y) : null;
+      const type = row ? typeOfRow(row) : null;
+      if (item.inLegend || !text(item) || !type || type === 'ignore') {
+        ignored += 1;
+        continue;
+      }
+      rowCounts[row.name] = (rowCounts[row.name] || 0) + 1;
+      const hex = item.fill ? hexOf(item.fill) : null;
+      typed[type].push({ id: item.id, title: text(item), x: item.x, y: item.y, w: item.w, h: item.h, hex, ...(row.kind === 'release' ? { release: row.name } : {}) });
+      continue;
+    }
     if (item.inLegend || !text(item) || isReleaseLabel(item) || LEGEND_TEXT.test(text(item))) {
       ignored += 1;
       continue;
@@ -256,7 +327,7 @@ function buildBacklog(items, legend) {
   const columns = [...features, ...typed.step];
   const taskById = new Map();
   for (const raw of typed.task.sort((a, b) => a.y - b.y || a.x - b.x)) {
-    const task = { ...raw, release: releaseOf(raw, releases), subtasks: [] };
+    const task = { ...raw, release: raw.release || releaseOf(raw, releases), subtasks: [] };
     taskById.set(task.id, task);
     if (subtaskOf.has(task.id)) continue;
     const drawn = drawnParent.get(task.id);
@@ -281,11 +352,13 @@ function buildBacklog(items, legend) {
   for (const f of features) for (const s of f.steps) delete s.feature;
 
   const rowNames = releases.laneOf ? releases.lanes.filter(Boolean) : releases.rows.map((r) => r.name);
-  const names = [...releases.sections.map((s) => s.name), ...rowNames];
+  const names = mode === 'rows' ? rows.filter((r) => r.kind === 'release').map((r) => r.name) : [...releases.sections.map((s) => s.name), ...rowNames];
   const milestones = [...new Set(names)];
   const tasks = [...taskById.values()];
 
   return {
+    mode,
+    rows: rows.map((r) => ({ name: r.name, kind: r.kind, type: typeOfRow(r), count: rowCounts[r.name] || 0 })),
     epics,
     looseFeatures,
     notes: typed.note.sort(byX),
@@ -606,7 +679,7 @@ function toMarkdown(backlog, matches = {}) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl, projectQuery, readProject, toMarkdown };
+  module.exports = { TYPES, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows, buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl, projectQuery, readProject, toMarkdown };
 }
 
 // ---------------------------------------------------------------------------
@@ -678,10 +751,17 @@ if (typeof figma !== 'undefined') {
     state.project = (await figma.clientStorage.getAsync('project')) || '';
     state.token = (await figma.clientStorage.getAsync('token')) || '';
     state.links = (await figma.clientStorage.getAsync(linksKey())) || {};
+    // How the board is read: per file, since two boards can follow two
+    // conventions. 'auto' picks rows for Figma's template, colours otherwise.
+    const reading = (await figma.clientStorage.getAsync(`reading:${figma.root.name}`)) || {};
+    state.mode = reading.mode || 'auto';
+    state.rowTypes = reading.rowTypes || {};
   };
 
+  const saveReading = () => figma.clientStorage.setAsync(`reading:${figma.root.name}`, { mode: state.mode, rowTypes: state.rowTypes });
+
   const publish = () => {
-    state.backlog = buildBacklog(state.items, state.legend);
+    state.backlog = buildBacklog(state.items, state.legend, { mode: state.mode, rowTypes: state.rowTypes });
     state.matches = state.issues ? matchIssues(state.backlog, state.issues, state.links) : {};
     figma.ui.postMessage({
       type: 'board',
@@ -695,7 +775,7 @@ if (typeof figma !== 'undefined') {
       nodeTypes: state.nodeTypes,
       drift: state.issues ? findDrift(state.backlog, state.issues, state.matches) : null,
       markdown: toMarkdown(state.backlog, state.matches),
-      settings: { repo: state.repo, project: state.project, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
+      settings: { repo: state.repo, project: state.project, mode: state.mode, hasToken: Boolean(state.token), issuesLoaded: state.issues ? state.issues.length : null },
       sprints: state.sprints || [],
     });
   };
@@ -762,6 +842,14 @@ if (typeof figma !== 'undefined') {
       if (msg.type === 'ready' || msg.type === 'refresh') {
         readBoard();
         await loadSettings();
+        publish();
+      } else if (msg.type === 'set-mode') {
+        state.mode = ['auto', 'rows', 'colours'].includes(msg.mode) ? msg.mode : 'auto';
+        await saveReading();
+        publish();
+      } else if (msg.type === 'set-row-type') {
+        state.rowTypes[msg.name] = msg.value;
+        await saveReading();
         publish();
       } else if (msg.type === 'set-legend') {
         state.legend[msg.hex] = msg.value;

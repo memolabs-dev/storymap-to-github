@@ -113,6 +113,7 @@
 
   .legend-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 110px; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .swatch { width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--border); }
+  .row-mark { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--text-2); background: var(--bg-2); }
   .legend-row .samples { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   select, input[type="text"], input[type="password"] { width: 100%; height: 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); padding: 0 8px; }
   label.field { display: block; margin-bottom: 12px; }
@@ -144,7 +145,6 @@
   <section id="tab-preview" role="tabpanel"></section>
   <section id="tab-drift" role="tabpanel" hidden></section>
   <section id="tab-legend" role="tabpanel" hidden>
-    <p class="help" style="margin:0 0 8px">Each sticky colour on the board becomes one kind of item. Change a line to fix the reading.</p>
     <div id="legend"></div>
   </section>
   <section id="tab-github" role="tabpanel" hidden>
@@ -167,7 +167,7 @@
   const $ = (id) => document.getElementById(id);
   const send = (msg) => parent.postMessage({ pluginMessage: msg }, '*');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const TYPE_LABEL = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'PO note', ignore: 'Ignore' };
+  const TYPE_LABEL = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'Note', ignore: 'Ignore' };
 
   let data = null;
   let filter = 'all';
@@ -288,24 +288,44 @@
       </div>
       ${notices.join('')}${chips}${sprintChips}
       <ul class="tree">${epics}${loose}</ul>
-      ${b.notes.length ? `<p class="section-title">PO notes, not issues</p><ul class="tree">${b.notes.map((x) => `<li>${row(x, 'note')}</li>`).join('')}</ul>` : ''}
+      ${b.notes.length ? `<p class="section-title">Notes, not issues</p><ul class="tree">${b.notes.map((x) => `<li>${row(x, 'note')}</li>`).join('')}</ul>` : ''}
       ${b.orphans.length ? `<p class="section-title">Without a parent</p><ul class="tree">${b.orphans.map((x) => `<li>${row(x, x.kind)}</li>`).join('')}</ul>` : ''}`;
   }
 
+  const typeSelect = (attr, value, label) => `<select ${attr} aria-label="${esc(label)}">
+    ${['epic', 'feature', 'step', 'task', 'note', 'ignore'].map((t) => `<option value="${t}" ${value === t ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}
+  </select>`;
+
   function renderLegend() {
-    $('legend-count').textContent = data.palette.length ? ` ${data.palette.length}` : '';
-    $('legend').innerHTML = data.palette.length ? data.palette.map((c) => `
+    const b0 = data.backlog;
+    const byRows = b0.mode === 'rows';
+    const mode = data.settings.mode || 'auto';
+    $('legend-count').textContent = byRows ? ` ${b0.rows.length}` : data.palette.length ? ` ${data.palette.length}` : '';
+    // How the board is read: by rows, as in Figma's story map template, or by
+    // sticky colour, as many team boards do.
+    const modes = `<div class="chips" role="group" aria-label="How the board is read">
+      ${[['auto', 'Automatic'], ['rows', 'By rows'], ['colours', 'By colours']].map(([m, label]) => `<button class="chip" aria-pressed="${mode === m}" data-mode="${m}">${label}</button>`).join('')}
+    </div>
+    <p class="help" style="margin:0 0 8px">${byRows
+      ? "Read by rows, as in Figma's story map template: each labelled row gives the kind of the stickies in it. Release rows become milestones."
+      : 'Read by colours: each sticky colour gives one kind of item. Change a line to fix the reading.'}${mode === 'auto' ? ' Chosen automatically.' : ''}</p>`;
+    const rowsHtml = b0.rows.length ? b0.rows.map((r) => `
+      <div class="legend-row">
+        <span class="swatch row-mark">${r.kind === 'release' ? 'R' : r.name.slice(0, 1).toUpperCase()}</span>
+        <div><div>${esc(r.name)}</div><div class="samples">${r.count} ${r.count === 1 ? 'sticky' : 'stickies'}${r.kind === 'release' ? ', milestone' : ''}</div></div>
+        ${typeSelect(`data-row="${esc(r.name)}"`, r.type, `Meaning of the ${r.name} row`)}
+      </div>`).join('') : '<div class="empty">No labelled rows on this page. Label rows "Activities", "Tasks", "Release 1" to read by rows.</div>';
+    const coloursHtml = data.palette.length ? data.palette.map((c) => `
       <div class="legend-row">
         <span class="swatch" style="background:${esc(c.hex)}"></span>
         <div><div>${c.count} ${c.hue} ${c.count > 1 ? 'stickies' : 'sticky'}</div><div class="samples" title="${esc(c.samples.join(' · '))}">${esc(c.samples.join(' · ')) || '<i>no text</i>'}</div></div>
-        <select data-hex="${esc(c.hex)}" aria-label="Meaning of ${esc(c.hue)} stickies">
-          ${['epic', 'feature', 'step', 'task', 'note', 'ignore'].map((t) => `<option value="${t}" ${data.legend[c.hex] === t ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}
-        </select>
+        ${typeSelect(`data-hex="${esc(c.hex)}"`, data.legend[c.hex], `Meaning of ${c.hue} stickies`)}
       </div>`).join('') : '<div class="empty">No coloured stickies on this page.</div>';
+    $('legend').innerHTML = modes + (byRows ? rowsHtml : coloursHtml);
     const types = Object.entries(data.nodeTypes || {}).sort((a, b) => b[1] - a[1]).map(([t, c]) => `${c} ${t.toLowerCase().replace(/_/g, ' ')}`).join(', ');
     const b = data.backlog.stats;
     $('legend').insertAdjacentHTML('beforeend', `<p class="help" style="margin-top:12px">Read on this page: ${esc(types || 'nothing')}.
-      ${b.swimlaneLines ? `${b.swimlaneLines} swimlane lines split the release rows.` : 'No swimlane lines found: a task takes the last release label at or above it.'}
+      ${byRows ? "" : b.swimlaneLines ? `${b.swimlaneLines} swimlane lines split the release rows.` : "No swimlane lines found: a task takes the last release label at or above it."}
       ${b.ignored} stickies skipped (legend, labels, empty or ignored colours).</p>`);
   }
 
@@ -391,6 +411,8 @@
     if (chip) { filter = chip.dataset.filter; renderPreview(); }
     const sprintChip = e.target.closest('[data-sprint]');
     if (sprintChip) { sprintFilter = sprintChip.dataset.sprint; renderPreview(); }
+    const modeChip = e.target.closest('[data-mode]');
+    if (modeChip) send({ type: 'set-mode', mode: modeChip.dataset.mode });
     const r = e.target.closest('.row[data-id]');
     if (r) send({ type: 'focus', id: r.dataset.id });
   });
@@ -400,6 +422,7 @@
   });
   document.addEventListener('change', (e) => {
     if (e.target.matches('select[data-hex]')) send({ type: 'set-legend', hex: e.target.dataset.hex, value: e.target.value });
+    if (e.target.matches('select[data-row]')) send({ type: 'set-row-type', name: e.target.dataset.row, value: e.target.value });
     if (e.target.matches('select[data-link-select]') && e.target.value !== '') {
       const v = e.target.value;
       send({ type: 'link', id: e.target.dataset.linkSelect, number: v === 'auto' ? null : Number(v) });

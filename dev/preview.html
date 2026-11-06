@@ -29,9 +29,10 @@
   let issues = null;
   let sprints = [];
   const links = {};
+  const reading = { mode: 'auto', rowTypes: {} };
 
   const post = () => {
-    const backlog = buildBacklog(items, legend);
+    const backlog = buildBacklog(items, legend, reading);
     const matches = issues ? matchIssues(backlog, issues, links) : {};
     frame.contentWindow.postMessage({ pluginMessage: {
       type: 'board', scope: 'page', page: 'Story map', palette, legend, backlog, matches,
@@ -40,7 +41,7 @@
       drift: issues ? findDrift(backlog, issues, matches) : null,
       nodeTypes: { STICKY: items.length },
       markdown: toMarkdown(backlog, matches),
-      settings: { repo, hasToken: false, issuesLoaded: issues ? issues.length : null },
+      settings: { repo, mode: reading.mode, hasToken: false, issuesLoaded: issues ? issues.length : null },
     } }, '*');
   };
 
@@ -50,6 +51,8 @@
     document.getElementById('log').textContent = JSON.stringify(msg) + '\n' + document.getElementById('log').textContent;
     if (msg.type === 'ready' || msg.type === 'refresh') post();
     if (msg.type === 'set-legend') { legend[msg.hex] = msg.value; post(); }
+    if (msg.type === 'set-mode') { reading.mode = msg.mode; post(); }
+    if (msg.type === 'set-row-type') { reading.rowTypes[msg.name] = msg.value; post(); }
     if (msg.type === 'why') {
       const res = await fetch(`https://api.github.com/repos/${repo}/issues/${msg.number}/events?per_page=100`);
       const lines = res.ok ? explainEvents(await res.json(), msg.kind) : null;
