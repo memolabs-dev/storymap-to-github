@@ -20,7 +20,7 @@ Run `bash brand/render.sh` after changing `icon.svg` or `cover.html`. It draws t
 
 ## Type
 
-Bricolage Grotesque 800 for the name and titles, Atkinson Hyperlegible for text, JetBrains Mono for issue labels such as `#19 · Sprint 1 · Ready`. In the name, "to" is lighter so the two words that matter stand out.
+Bricolage Grotesque 800 for the name and titles, Atkinson Hyperlegible for text, JetBrains Mono for issue labels such as `#19 · Sprint 1 · Ready`. In the name, `to` is lighter so the two words that matter stand out.
 
 ## Not used
 
