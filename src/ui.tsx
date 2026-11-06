@@ -19,6 +19,17 @@ import { useEffect, useState } from 'preact/hooks'
 import { draftIssue, normalize, suggestIssues } from './core'
 import type { Drift, Feature, ItemType, MapNode, Task } from './core'
 import type {
+  AuthHandler,
+  AuthPayload,
+  CancelSignInHandler,
+  ProjectChoice,
+  ProjectsHandler,
+  RepoChoice,
+  ReposHandler,
+  SaveTokenHandler,
+  SelectProjectHandler,
+  SelectRepoHandler,
+  SignInHandler,
   BoardHandler,
   BoardPayload,
   CompareHandler,
@@ -243,6 +254,13 @@ function Plugin() {
   // from its card, to show how it went there.
   const [draftTitle, setDraftTitle] = useState('')
   const [publishedFrom, setPublishedFrom] = useState<string | null>(null)
+  const [auth, setAuth] = useState<AuthPayload>({ state: 'idle' })
+  const [repos, setRepos] = useState<Array<RepoChoice> | null>(null)
+  const [projects, setProjects] = useState<Array<ProjectChoice> | null>(null)
+  const [repoSearch, setRepoSearch] = useState('')
+  const [changingRepo, setChangingRepo] = useState(false)
+  const [useToken, setUseToken] = useState(false)
+  const [codeCopied, setCodeCopied] = useState(false)
   const [startLabel, setStartLabel] = useState<string | null>(null)
   const [startStatus, setStartStatus] = useState<string | null>(null)
 
@@ -262,6 +280,9 @@ function Plugin() {
         setProject((p) => p || next.settings.project)
       }),
       on<StatusHandler>('STATUS', setStatus),
+      on<AuthHandler>('AUTH', setAuth),
+      on<ReposHandler>('REPOS', setRepos),
+      on<ProjectsHandler>('PROJECTS', setProjects),
       on<WhyResultHandler>('WHY_RESULT', (key, lines, error) => setWhy((w) => ({ ...w, [key]: { lines, error } }))),
       on<SelectedHandler>('SELECTED', (id) => {
         setSelected(id)
@@ -680,41 +701,155 @@ function Plugin() {
     )
   }
 
-  const github = () => (
-    <Fragment>
-      <div style={{ height: 12 }} />
-      {status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
-      <div class={styles.field}>
-        <span class={styles.fieldLabel}>Repository</span>
-        <Textbox value={repo} onValueInput={setRepo} placeholder="owner/name" spellCheck={false} />
-      </div>
-      <div class={styles.field}>
-        <span class={styles.fieldLabel}>Project board, for sprints (optional)</span>
-        <Textbox value={project} onValueInput={setProject} placeholder="https://github.com/orgs/owner/projects/12" spellCheck={false} />
-      </div>
-      <div class={styles.field}>
-        <span class={styles.fieldLabel}>Token (optional)</span>
-        <Textbox value={token} onValueInput={setToken} password placeholder={board.settings.hasToken ? 'Saved on this computer' : 'Needed for sprints or a private repository'} />
-      </div>
-      <p class={styles.help}>Sprints need a token that can read projects (classic token: read:project, and repo for a private repository). Publishing needs repo and project, and read:org to see every issue type of an organisation. The token stays on this computer.</p>
-      <div class={styles.actions}>
-        <Button
-          onClick={() => {
-            emit<CompareHandler>('COMPARE', repo, project, token)
-            setToken('')
-          }}
-        >
-          Compare with issues
-        </Button>
-        {board.settings.hasToken ? <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Forget token</Button> : null}
-      </div>
-      {board.settings.repo && board.settings.meta && repo.trim().toLowerCase() === board.settings.repo.toLowerCase() ? (
-        writing()
-      ) : board.settings.repo && repo.trim() ? (
-        <p class={styles.help}>Press Compare to connect {repo.trim()} before allowing changes to it.</p>
-      ) : null}
-    </Fragment>
-  )
+  // Copies with a hidden text area: the Clipboard API is blocked in plugin windows.
+  const copyText = (text: string) => {
+    const area = document.createElement('textarea')
+    area.value = text
+    document.body.appendChild(area)
+    area.select()
+    const ok = document.execCommand('copy')
+    area.remove()
+    return ok
+  }
+
+  // Connecting takes three choices: sign in, pick a repository, pick its
+  // project board. What the plugin may do there comes last; the rest of the
+  // settings wait under "More settings".
+  const github = () => {
+    const s = board.settings
+    const signedIn = Boolean(s.login)
+    const query = repoSearch.trim().toLowerCase()
+    const shown = (repos || []).filter((r) => r.name.toLowerCase().includes(query)).slice(0, 8)
+    const typed = /^[\w.-]+\/[\w.-]+$/.test(repoSearch.trim()) && !(repos || []).some((r) => r.name.toLowerCase() === query)
+    const pickRepo = (name: string) => {
+      setChangingRepo(false)
+      setRepoSearch('')
+      setRepo(name)
+      emit<SelectRepoHandler>('SELECT_REPO', name)
+    }
+    return (
+      <Fragment>
+        <div style={{ height: 12 }} />
+        {status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
+
+        <div class={styles.step}>
+          <span class={styles.stepTitle}>1. Your GitHub account</span>
+          {auth.state === 'error' ? <div class={`${styles.notice} ${styles.error}`}>{auth.error}</div> : null}
+          {signedIn ? (
+            <div class={styles.stepRow}>
+              <span>Connected as <strong>@{s.login}</strong></span>
+              <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Sign out</Button>
+            </div>
+          ) : null}
+          {signedIn ? (
+            <p class={styles.help}>
+              The plugin can read and change issues in the repositories your account can reach; it only writes where you choose "Create issues". Signing out forgets the token here; revoke it on{' '}
+              <button class={styles.linkButton} onClick={() => emit<OpenHandler>('OPEN', 'https://github.com/settings/applications')}>GitHub</button>.
+            </p>
+          ) : auth.state === 'code' ? (
+            <Fragment>
+              <p class={styles.help}>Enter this code on GitHub, then authorize Storymap to GitHub.</p>
+              <div class={styles.userCode}>{auth.userCode}</div>
+              <div class={styles.actions}>
+                <Button
+                  onClick={() => {
+                    setCodeCopied(copyText(auth.userCode || ''))
+                    if (auth.url) emit<OpenHandler>('OPEN', auth.url)
+                  }}
+                >
+                  {codeCopied ? 'Code copied, opening GitHub' : 'Copy the code and open GitHub'}
+                </Button>
+                <Button secondary onClick={() => emit<CancelSignInHandler>('CANCEL_SIGN_IN')}>Cancel</Button>
+              </div>
+              <p class={styles.help}>Waiting for GitHub…</p>
+            </Fragment>
+          ) : s.hasToken ? (
+            <div class={styles.stepRow}>
+              <span>Connected with a token</span>
+              <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Forget it</Button>
+            </div>
+          ) : (
+            <Fragment>
+              <div class={styles.actions}>
+                <Button
+                  disabled={auth.state === 'starting'}
+                  onClick={() => {
+                    setCodeCopied(false)
+                    emit<SignInHandler>('SIGN_IN')
+                  }}
+                >
+                  Connect with GitHub
+                </Button>
+              </div>
+              {useToken ? (
+                <div class={styles.field}>
+                  <span class={styles.fieldLabel}>Or paste a token (classic: repo, project, read:org)</span>
+                  <Textbox value={token} onValueInput={setToken} password placeholder="ghp_…" />
+                  <div class={styles.actions}>
+                    <Button
+                      secondary
+                      disabled={!token.trim()}
+                      onClick={() => {
+                        emit<SaveTokenHandler>('SAVE_TOKEN', token)
+                        setToken('')
+                      }}
+                    >
+                      Use this token
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p class={styles.help}>
+                  Opens GitHub to approve, nothing to copy by hand. <button class={styles.linkButton} onClick={() => setUseToken(true)}>Use a token instead</button>
+                </p>
+              )}
+            </Fragment>
+          )}
+        </div>
+
+        {s.hasToken ? (
+          <div class={styles.step}>
+            <span class={styles.stepTitle}>2. Repository</span>
+            {s.repo && !changingRepo ? (
+              <div class={styles.stepRow}>
+                <strong>{s.repo}</strong>
+                <Button secondary onClick={() => setChangingRepo(true)}>Change</Button>
+              </div>
+            ) : (
+              <Fragment>
+                <SearchTextbox value={repoSearch} onValueInput={setRepoSearch} placeholder={repos ? `Search ${repos.length} repositories` : 'Loading your repositories…'} />
+                {shown.map((r) => (
+                  <button key={r.name} class={styles.candidate} onClick={() => pickRepo(r.name)}>
+                    {r.name}
+                    {r.private ? <span class={styles.candidateWhy}>Private</span> : null}
+                  </button>
+                ))}
+                {typed ? <button class={styles.candidate} onClick={() => pickRepo(repoSearch.trim())}>Use {repoSearch.trim()}</button> : null}
+                {s.repo ? <Button secondary onClick={() => setChangingRepo(false)}>Keep {s.repo}</Button> : null}
+              </Fragment>
+            )}
+          </div>
+        ) : null}
+
+        {s.hasToken && s.repo && !changingRepo ? (
+          <div class={styles.step}>
+            <span class={styles.stepTitle}>3. Project board, for sprints and status</span>
+            {projects === null ? (
+              <p class={styles.help}>Looking for the boards of {s.repo}…</p>
+            ) : (
+              <Dropdown
+                value={s.project || 'none'}
+                options={[{ value: 'none', text: projects.length ? 'No board' : 'This repository has no board' }, ...projects.map((p) => ({ value: p.url, text: p.title }))]}
+                onValueChange={(v: string) => emit<SelectProjectHandler>('SELECT_PROJECT', v === 'none' ? '' : v)}
+              />
+            )}
+          </div>
+        ) : null}
+
+        {s.hasToken && s.repo && s.meta && !changingRepo ? writing() : null}
+      </Fragment>
+    )
+  }
 
   // Writing to GitHub: off by default, per repository, with the values a
   // new issue starts with, which each team sets to its own words.
@@ -723,11 +858,18 @@ function Plugin() {
     const save = (change: { startLabel?: string; startStatus?: string }) => emit<SetPublishingHandler>('SET_PUBLISHING', change)
     return (
       <div class={styles.publish}>
-        <Toggle value={writeAllowed} onValueChange={(v: boolean) => emit<SetWriteHandler>('SET_WRITE', v)}>
-          Allow changes to {repoName}
-        </Toggle>
-        <p class={styles.help}>Off by default. When on, a sticky's card can create its issue in {repoName}, after showing what it will be. Nothing else is changed.</p>
-        {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>This token cannot write to {repoName}: publishing will fail.</div> : null}
+        <span class={styles.stepTitle}>4. What the plugin may do in {repoName}</span>
+        <SegmentedControl
+          value={writeAllowed ? 'write' : 'read'}
+          options={[{ value: 'read', children: 'Read only' }, { value: 'write', children: 'Create issues' }]}
+          onValueChange={(v: string) => emit<SetWriteHandler>('SET_WRITE', v === 'write')}
+        />
+        <p class={styles.help}>
+          {writeAllowed ? `A sticky's card can create its issue, after showing what it will be. Nothing else is changed.` : 'The plugin only reads GitHub. This is the default for every repository.'}
+        </p>
+        {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>Your account cannot write to {repoName}: creating issues will fail.</div> : null}
+        <details class={styles.more}>
+          <summary>More settings</summary>
         <div class={styles.field}>
           <span class={styles.fieldLabel}>Label of a new issue (empty for none)</span>
           <Textbox
@@ -746,6 +888,7 @@ function Plugin() {
             spellCheck={false}
           />
         </div>
+        </details>
       </div>
     )
   }

@@ -35,6 +35,8 @@ export interface BoardPayload {
     project: string
     mode: ReadingMode
     hasToken: boolean
+    // The GitHub account the plugin is signed in with, when signed in.
+    login: string | null
     issuesLoaded: number | null
     // What the repository offers to new issues, read with its issues.
     meta: (RepoMeta & { canPush: boolean }) | null
@@ -49,6 +51,25 @@ export interface BoardPayload {
 export interface Guide {
   readingConfirmed: boolean
   hidden: boolean
+}
+
+// Signing in with GitHub's device flow: the code to enter on GitHub while
+// the plugin waits, then the result.
+export interface AuthPayload {
+  state: 'idle' | 'starting' | 'code' | 'error'
+  userCode?: string
+  url?: string
+  error?: string
+}
+
+export interface RepoChoice {
+  name: string
+  private: boolean
+}
+
+export interface ProjectChoice {
+  title: string
+  url: string
 }
 
 export interface StatusPayload {
@@ -74,7 +95,40 @@ export interface SelectedHandler extends EventHandler {
   handler: (id: string | null) => void
 }
 
+export interface AuthHandler extends EventHandler {
+  name: 'AUTH'
+  handler: (auth: AuthPayload) => void
+}
+export interface ReposHandler extends EventHandler {
+  name: 'REPOS'
+  handler: (repos: Array<RepoChoice>) => void
+}
+export interface ProjectsHandler extends EventHandler {
+  name: 'PROJECTS'
+  handler: (projects: Array<ProjectChoice> | null) => void
+}
+
 // From the window to the plugin.
+export interface SignInHandler extends EventHandler {
+  name: 'SIGN_IN'
+  handler: () => void
+}
+export interface CancelSignInHandler extends EventHandler {
+  name: 'CANCEL_SIGN_IN'
+  handler: () => void
+}
+export interface SaveTokenHandler extends EventHandler {
+  name: 'SAVE_TOKEN'
+  handler: (token: string) => void
+}
+export interface SelectRepoHandler extends EventHandler {
+  name: 'SELECT_REPO'
+  handler: (repo: string) => void
+}
+export interface SelectProjectHandler extends EventHandler {
+  name: 'SELECT_PROJECT'
+  handler: (url: string) => void
+}
 export interface ReadyHandler extends EventHandler {
   name: 'READY'
   handler: () => void

@@ -1,0 +1,11 @@
+// The sign-in relay. Deploy with: npx wrangler deploy --config relay/wrangler.jsonc
+{
+  "name": "storymap-auth",
+  "main": "index.js",
+  "compatibility_date": "2026-11-06",
+  // Served at storymap-auth.<account>.workers.dev: memolabs.dev's DNS is not on Cloudflare.
+  "workers_dev": true,
+  // The OAuth App's client id is public: the device flow uses no secret.
+  "vars": { "GITHUB_CLIENT_ID": "Ov23liiAjm2PFi79C2Qo" },
+  "observability": { "enabled": false }
+}

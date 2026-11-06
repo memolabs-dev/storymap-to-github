@@ -20,6 +20,15 @@ import {
 } from './core'
 import type { Backlog, BoardItem, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
 import type {
+  AuthHandler,
+  AuthPayload,
+  CancelSignInHandler,
+  ProjectsHandler,
+  ReposHandler,
+  SaveTokenHandler,
+  SelectProjectHandler,
+  SelectRepoHandler,
+  SignInHandler,
   BoardHandler,
   CompareHandler,
   FocusHandler,
@@ -59,6 +68,7 @@ interface State {
   repo: string
   project: string
   token: string
+  login: string | null
   sprints: Array<Sprint>
   mode: ReadingMode
   rowTypes: Record<string, ItemType>
@@ -86,6 +96,7 @@ const state: State = {
   repo: '',
   project: '',
   token: '',
+  login: null,
   sprints: [],
   mode: 'auto',
   rowTypes: {},
@@ -214,6 +225,7 @@ async function loadSettings() {
   state.repo = (await figma.clientStorage.getAsync(fileKey('repo'))) || ''
   state.project = (await figma.clientStorage.getAsync(fileKey('project'))) || ''
   state.token = (await figma.clientStorage.getAsync('token')) || ''
+  state.login = (await figma.clientStorage.getAsync('login')) || null
   await moveOldLinks()
   readLinks()
   const reading = (await figma.clientStorage.getAsync(fileKey('reading'))) || {}
@@ -272,6 +284,7 @@ function publish() {
       project: state.project,
       mode: state.mode,
       hasToken: Boolean(state.token),
+      login: state.login,
       issuesLoaded: state.issues ? state.issues.length : null,
       meta: state.meta,
       writeAllowed: state.writeAllowed,
@@ -581,6 +594,112 @@ function onSelectionChange() {
   emit<SelectedHandler>('SELECTED', id)
 }
 
+// Signing in ---------------------------------------------------------------
+// GitHub's device flow: the plugin gets a short code, the person enters it
+// on github.com/login/device and authorizes, and the plugin polls until
+// GitHub hands over a token. The calls go through a small relay because
+// GitHub's sign-in endpoints refuse calls from a browser window (no CORS);
+// the relay keeps nothing (relay/index.js).
+const RELAY = 'https://storymap-auth.storymap-authmemolabsworkersdev.workers.dev'
+
+let signInRun = 0
+
+const sendAuth = (auth: AuthPayload) => emit<AuthHandler>('AUTH', auth)
+
+async function relay(path: string, body: Record<string, string> = {}) {
+  const res = await fetch(`${RELAY}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  return (await res.json()) as Record<string, unknown>
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function signIn() {
+  const run = (signInRun += 1)
+  sendAuth({ state: 'starting' })
+  const code = await relay('/device/code')
+  if (run !== signInRun) return
+  if (!code.device_code) throw new Error(`GitHub did not start the sign-in (${String(code.error || 'no answer')}).`)
+  const url = String(code.verification_uri)
+  sendAuth({ state: 'code', userCode: String(code.user_code), url })
+  let interval = Number(code.interval || 5) * 1000
+  const deadline = Date.now() + Number(code.expires_in || 900) * 1000
+  while (run === signInRun && Date.now() < deadline) {
+    await wait(interval)
+    if (run !== signInRun) return
+    const answer = await relay('/token', { device_code: String(code.device_code) })
+    if (run !== signInRun) return
+    if (answer.access_token) {
+      await useToken(String(answer.access_token))
+      sendAuth({ state: 'idle' })
+      return
+    }
+    const error = String(answer.error || '')
+    if (error === 'authorization_pending') continue
+    if (error === 'slow_down') {
+      interval = Number(answer.interval || interval / 1000 + 5) * 1000
+      continue
+    }
+    if (error === 'access_denied') return sendAuth({ state: 'error', error: 'Sign-in was cancelled on GitHub.' })
+    return sendAuth({ state: 'error', error: `GitHub stopped the sign-in (${error || 'no answer'}).` })
+  }
+  if (run === signInRun) sendAuth({ state: 'error', error: 'The code expired. Start again.' })
+}
+
+// Keeps a token, from the sign-in or pasted, and finds whose it is.
+// A token GitHub refuses is never saved.
+async function useToken(token: string) {
+  const res = await fetch('https://api.github.com/user', { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` } })
+  if (!res.ok) throw new Error('GitHub refused this token.')
+  state.token = token
+  state.login = ((await res.json()) as { login: string }).login
+  await figma.clientStorage.setAsync('token', token)
+  await figma.clientStorage.setAsync('login', state.login)
+  publish()
+  await listRepos()
+}
+
+// The repositories the account can see, most recently pushed first.
+async function listRepos() {
+  if (!state.token) return
+  const repos: Array<{ name: string; private: boolean }> = []
+  for (let page = 1; page <= 3; page += 1) {
+    const res = await fetch(`https://api.github.com/user/repos?per_page=100&sort=pushed&page=${page}`, { headers: githubHeaders() })
+    if (!res.ok) break
+    const batch = (await res.json()) as Array<{ full_name: string; private: boolean }>
+    repos.push(...batch.map((r) => ({ name: r.full_name, private: r.private })))
+    if (batch.length < 100) break
+  }
+  emit<ReposHandler>('REPOS', repos)
+}
+
+// The open project boards linked to the repository.
+async function listProjects(): Promise<Array<{ title: string; url: string }>> {
+  if (!state.token || !state.repo) return []
+  const [owner, name] = state.repo.split('/')
+  const data = await graphql<{ repository: { projectsV2: { nodes: Array<{ title: string; url: string; closed: boolean }> } } | null }>(
+    'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { projectsV2(first: 20) { nodes { title url closed } } } }',
+    { owner, name },
+  ).catch(() => null)
+  const projects = data && data.repository ? data.repository.projectsV2.nodes.filter((p) => !p.closed).map((p) => ({ title: p.title, url: p.url })) : []
+  emit<ProjectsHandler>('PROJECTS', projects)
+  return projects
+}
+
+// Picking a repository connects the board to it at once; its project board
+// is picked too when it has exactly one.
+async function selectRepo(repo: string) {
+  state.repo = repo.trim()
+  readLinks()
+  await loadRepoSettings()
+  emit<ProjectsHandler>('PROJECTS', null)
+  const projects = await listProjects()
+  const saved = (await figma.clientStorage.getAsync(fileKey('repo'))) === state.repo ? state.project : ''
+  state.project = saved && projects.some((p) => p.url === saved) ? saved : projects.length === 1 ? projects[0].url : ''
+  await figma.clientStorage.setAsync(fileKey('repo'), state.repo)
+  await figma.clientStorage.setAsync(fileKey('project'), state.project)
+  await compare()
+}
+
 // Reads the issues of the connected repository, and the sprints of its
 // project board when one is named, then shows the result.
 async function compare() {
@@ -622,7 +741,11 @@ export default function () {
       onSelectionChange()
       // Once a repository is connected, it is read again at every opening,
       // so the map shows GitHub's state without pressing anything.
-      if (state.repo) await compare()
+      if (state.token) void listRepos().catch(() => undefined)
+      if (state.repo) {
+        void listProjects().catch(() => undefined)
+        await compare()
+      }
     })().catch(fail)
   })
 
@@ -674,6 +797,31 @@ export default function () {
     })().catch(fail)
   })
 
+  on<SignInHandler>('SIGN_IN', () => {
+    void signIn().catch((err) => sendAuth({ state: 'error', error: err instanceof Error ? err.message : String(err) }))
+  })
+
+  on<CancelSignInHandler>('CANCEL_SIGN_IN', () => {
+    signInRun += 1
+    sendAuth({ state: 'idle' })
+  })
+
+  on<SaveTokenHandler>('SAVE_TOKEN', (token) => {
+    void useToken(token.trim()).catch(fail)
+  })
+
+  on<SelectRepoHandler>('SELECT_REPO', (repo) => {
+    void selectRepo(repo).catch(fail)
+  })
+
+  on<SelectProjectHandler>('SELECT_PROJECT', (url) => {
+    void (async () => {
+      state.project = url
+      await figma.clientStorage.setAsync(fileKey('project'), url)
+      await compare()
+    })().catch(fail)
+  })
+
   on<WhyHandler>('WHY', (key, number, kind) => {
     void (async () => {
       const res = await fetch(`https://api.github.com/repos/${state.repo}/issues/${number}/events?per_page=100`, { headers: githubHeaders() })
@@ -691,9 +839,23 @@ export default function () {
     publish()
   })
 
+  // Signing out forgets the token and what was read with it. The token stays
+  // valid on GitHub until revoked at github.com/settings/applications: only
+  // the app's secret could revoke it, and the plugin has none.
   on<ForgetTokenHandler>('FORGET_TOKEN', () => {
     state.token = ''
-    void figma.clientStorage.deleteAsync('token').then(publish).catch(fail)
+    state.login = null
+    state.issues = null
+    state.meta = null
+    state.sprints = []
+    state.readAt = null
+    emit<ReposHandler>('REPOS', [])
+    emit<ProjectsHandler>('PROJECTS', null)
+    void (async () => {
+      await figma.clientStorage.deleteAsync('token')
+      await figma.clientStorage.deleteAsync('login')
+      publish()
+    })().catch(fail)
   })
 
   on<SetLabelsHandler>('SET_LABELS', (labelsOn) => {

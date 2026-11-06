@@ -34,9 +34,10 @@
     "documentAccess": "dynamic-page",
     "networkAccess": {
       "allowedDomains": [
-        "https://api.github.com"
+        "https://api.github.com",
+        "https://storymap-auth.storymap-authmemolabsworkersdev.workers.dev"
       ],
-      "reasoning": "Reads the issues and project board of the repository you name, to show each story map item's state and where the map and GitHub disagree."
+      "reasoning": "Reads and, when the team allows it, creates issues in the GitHub repository you pick. The storymap-auth relay relays GitHub's sign-in, which refuses calls from a browser window; it keeps nothing."
     }
   },
   "type": "module"

@@ -25,7 +25,7 @@ The plugin reads the whole current page and needs edit access to the file: Figma
 
 ## Linking stickies and issues
 
-In the GitHub tab, name the repository and press Compare. Each FigJam file keeps its own repository and project board, so a copy of a board can be connected to a test repository while the original stays on the real one. Items whose title matches an issue (case, accents, `Epic:` prefixes and small words ignored) are linked. For the others, click the sticky on the board: its card shows the three issues it most likely is, with the words they share, a search box, and "Not on GitHub yet". Links are saved in the file, on each sticky and for each repository, so everyone working on the board sees the same ones.
+In the GitHub tab, press **Connect with GitHub**: the plugin shows a short code, opens GitHub, and is connected once you authorize it there. Then pick the repository from your list, and its project board. Each FigJam file keeps its own repository and project board, so a copy of a board can be connected to a test repository while the original stays on the real one. Items whose title matches an issue (case, accents, `Epic:` prefixes and small words ignored) are linked. For the others, click the sticky on the board: its card shows the three issues it most likely is, with the words they share, a search box, and "Not on GitHub yet". Links are saved in the file, on each sticky and for each repository, so everyone working on the board sees the same ones.
 
 **Publishing a sticky.** The card of a sticky that is not on GitHub yet shows the issue it would become: its title, which you can edit, its type, its parent, its milestone from the release row, its labels, and its status on the project board. Then "Create the issue" creates it, makes it a sub-issue of its parent, adds it to the board and links the sticky. Nothing is written until the team turns on "Allow changes to owner/repo" in the GitHub tab, which is off for every repository by default. The label and status a new issue starts with are set there too, for each repository (by default `needs-refinement` and `Backlog`). If the owner has no issue type for an epic, feature or task, a label of that name stands in for it. A sticky whose parent is not on GitHub yet is published without a parent, and the preview says so.
 
@@ -35,7 +35,7 @@ In the GitHub tab, name the repository and press Compare. Each FigJam file keeps
 
 The Drift tab lists where the plan and the work no longer say the same thing: a task in another release row than its milestone, an issue under another parent than on the map, a renamed issue, an issue closed as not planned while the map still has it. It also counts the stickies with no issue and lists the open issues that are not on the map.
 
-**Sprints.** Name the GitHub Projects board in the GitHub tab to read each issue's sprint, status and size. Tasks then carry their sprint, the preview filters by sprint, and Drift flags a task whose sprint ends after the due date of its release on the map. GitHub only serves projects through GraphQL, which needs a token that can read projects (classic token: `read:project`).
+**Sprints.** Name the GitHub Projects board in the GitHub tab to read each issue's sprint, status and size. Tasks then carry their sprint, the preview filters by sprint, and Drift flags a task whose sprint ends after the due date of its release on the map. The board is listed once you are connected.
 
 **Why?** reads the issue's history on GitHub and says who changed what, and when ("2026-11-05, @someone set the milestone to P0"). Nothing is changed on either side: the team decides which one is right.
 
@@ -49,6 +49,10 @@ npm run build
 ```
 
 Then in FigJam: Plugins, Development, Import plugin from manifest, and pick the `manifest.json` the build wrote. Open the page that holds your story map and run Storymap to GitHub.
+
+## Signing in
+
+GitHub's device flow signs people in without a password or a secret in the plugin. GitHub's sign-in endpoints refuse calls from a browser window, so two calls go through a small Cloudflare Worker, [relay/index.js](relay/index.js), which keeps nothing: no secret, no token, no log. The client id and the scopes (`repo project read:org`) are set in the relay, not by the caller. Deploy it with `npx wrangler deploy --config relay/wrangler.jsonc`. A classic token can still be pasted instead.
 
 ## Try it on a copy
 
