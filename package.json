@@ -2,7 +2,7 @@
   "name": "storymap-to-github",
   "version": "0.2.0",
   "private": true,
-  "description": "FigJam plugin: read a user story map as GitHub epics, features, tasks and milestones, and see where it drifts from GitHub",
+  "description": "FigJam plugin: read a story map as a GitHub backlog, create issues and drafts, and keep the two in step",
   "license": "MIT",
   "dependencies": {
     "@create-figma-plugin/ui": "^4.0.3",
