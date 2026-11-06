@@ -3,7 +3,13 @@
 // sticky, where the map and GitHub drift apart, and the reading settings.
 import {
   Button,
+  Disclosure,
   Dropdown,
+  IconButton,
+  IconClose16,
+  IconLockLocked16,
+  IconPublish16,
+  IconRefresh16,
   SearchTextbox,
   SegmentedControl,
   Tabs,
@@ -61,6 +67,7 @@ type Kind = 'epic' | 'feature' | 'step' | 'task' | 'note'
 
 const KIND_LABEL: Record<string, string> = { epic: 'Epic', feature: 'Feature', step: 'Step', task: 'Task', note: 'Note', ignore: 'Ignore' }
 const TYPE_OPTIONS = (['epic', 'feature', 'step', 'task', 'note', 'ignore'] as Array<ItemType>).map((value) => ({ value, text: KIND_LABEL[value] }))
+const TAB_NAMES = ['Map', 'Differences', 'Reading', 'GitHub']
 const DRIFT_LABEL: Record<Drift['kind'], string> = { dropped: 'Dropped on GitHub', schedule: 'Planned too late', milestone: 'Milestone', parent: 'Parent', title: 'Title' }
 
 // Where an item sits in the tree, found by its sticky id.
@@ -156,7 +163,7 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
           </p>
           <div class={styles.actions}>
             <Button onClick={() => emit<SetGuideHandler>('SET_GUIDE', { readingConfirmed: true })}>That's right</Button>
-            <Button secondary onClick={() => props.goTo('Legend')}>Adjust</Button>
+            <Button secondary onClick={() => props.goTo('Reading')}>Adjust</Button>
           </div>
         </Fragment>
       ),
@@ -175,7 +182,7 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
     },
     {
       title: 'Link your stickies to their issues',
-      done: connected && progress.total > 0 && progress.linked === progress.total,
+      done: connected && progress.linked > 0,
       body: (
         <p class={styles.help}>
           {connected ? `${progress.linked} of ${progress.total} linked. ` : ''}Click a sticky on the board: its card shows the issues it most likely is.
@@ -192,25 +199,23 @@ function Guide(props: { board: BoardPayload; now: number; goTo: (tab: string) =>
       ),
     },
   ]
+  // Only the step to do now is open; the guide goes away once all are done.
   const current = steps.findIndex((s) => !s.done)
+  if (current === -1) return null
+  const step = steps[current]
   return (
     <div class={styles.guide}>
-      <div class={styles.cardHead}>
-        <span class={styles.cardTitle}>Getting started</span>
-        <span class={styles.help}>{steps.filter((s) => s.done).length} of {steps.length}</span>
-        <button class={styles.close} onClick={() => emit<SetGuideHandler>('SET_GUIDE', { hidden: true })} aria-label="Hide the guide">✕</button>
+      <div class={styles.guideHead}>
+        <span class={styles.guideCount}>Get started · {current + 1} of {steps.length}</span>
+        <span class={styles.guideDots}>
+          {steps.map((s, i) => <span key={s.title} class={`${styles.guideDot} ${s.done ? styles.guideDotDone : i === current ? styles.guideDotNow : ''}`} />)}
+        </span>
+        <IconButton onClick={() => emit<SetGuideHandler>('SET_GUIDE', { hidden: true })} title="Hide the guide">
+          <IconClose16 />
+        </IconButton>
       </div>
-      <ol class={styles.steps4}>
-        {steps.map((s, i) => (
-          <li key={s.title} class={s.done ? styles.stepDone : i === current ? styles.stepCurrent : styles.stepLater}>
-            <span class={styles.stepMark}>{s.done ? '✓' : i + 1}</span>
-            <div class={styles.stepBody}>
-              <div class={styles.stepTitle}>{s.title}</div>
-              {i === current || (s.done && i === 1) ? s.body : null}
-            </div>
-          </li>
-        ))}
-      </ol>
+      <div class={styles.guideTitle}>{step.title}</div>
+      {step.body}
     </div>
   )
 }
@@ -239,7 +244,7 @@ function Badge(props: { board: BoardPayload; id: string; onOpen: () => void }) {
 function Plugin() {
   const [board, setBoard] = useState<BoardPayload | null>(null)
   const [status, setStatus] = useState<StatusPayload | null>(null)
-  const [tab, setTab] = useState('Preview')
+  const [tab, setTab] = useState('Map')
   const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('all')
   const [sprintFilter, setSprintFilter] = useState('all')
@@ -261,6 +266,7 @@ function Plugin() {
   const [changingRepo, setChangingRepo] = useState(false)
   const [useToken, setUseToken] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ drifts: true })
   const [startLabel, setStartLabel] = useState<string | null>(null)
   const [startStatus, setStartStatus] = useState<string | null>(null)
 
@@ -288,7 +294,7 @@ function Plugin() {
         setSelected(id)
         setSearch('')
         setDraftTitle('')
-        if (id) setTab('Preview')
+        if (id) setTab('Map')
       }),
     ]
     emit<ReadyHandler>('READY')
@@ -332,9 +338,8 @@ function Plugin() {
           }
         }}
       >
-        <span class={`${styles.dot} ${styles[kind]}`} />
-        <span class={styles.kind}>{KIND_LABEL[kind]}</span>
-        <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={item.title}>
+        <span class={`${styles.dot} ${styles[kind]}`} title={KIND_LABEL[kind]} />
+        <span class={`${styles.label} ${kind === 'epic' ? styles.labelStrong : ''}`} title={`${KIND_LABEL[kind]}: ${item.title}`}>
           {item.title}
         </span>
         {item.release ? <span class={`${styles.pill} ${styles.pillMilestone}`}>{item.release}</span> : null}
@@ -425,7 +430,7 @@ function Plugin() {
         ) : null}
         {canLink && !issue && board.issues.length ? (
           <Fragment>
-            <p class={styles.help}>{m && m.confirmed ? 'Marked as not on GitHub yet.' : 'Is it one of these issues?'}</p>
+            <p class={styles.question}>{m && m.confirmed ? 'Marked as not on GitHub yet.' : 'Already on GitHub? Pick its issue'}</p>
             {candidates.map((c) => (
               <button key={c.number} class={styles.candidate} onClick={() => linkTo(c.number)}>
                 #{c.number} {c.title}
@@ -440,7 +445,7 @@ function Plugin() {
               </button>
             ))}
             <div class={styles.actions}>
-              {!(m && m.confirmed) ? <Button secondary onClick={() => linkTo(0)}>Not on GitHub yet</Button> : null}
+              {!(m && m.confirmed) ? <Button secondary onClick={() => linkTo(0)}>None of these</Button> : null}
               {m && (m.status === 'linked' || m.confirmed) ? <Button secondary onClick={() => linkTo(null)}>Guess from the title</Button> : null}
             </div>
           </Fragment>
@@ -470,7 +475,8 @@ function Plugin() {
     if (projectUrl) lines.push(['On the board', draft.status || 'Added, without status'])
     return (
       <div class={styles.publish}>
-        <span class={styles.fieldLabel}>Or publish it as a new issue in {repoName}</span>
+        <p class={styles.question}>Not yet? Create its issue in {repoName}</p>
+        <span class={styles.fieldLabel}>Title</span>
         <Textbox value={title} onValueInput={setDraftTitle} spellCheck={false} />
         <dl class={styles.draft}>
           {lines.map(([k, v]) => (
@@ -516,46 +522,61 @@ function Plugin() {
       )
     }
     const releases = ['all', ...b.milestones, ...(b.stats.withoutMilestone ? ['none'] : [])]
+    const progress = linkProgress(board)
     return (
       <Fragment>
-        {!board.guide.hidden ? <Guide board={board} now={now} goTo={setTab} /> : null}
         {card()}
-        {board.issues.length ? (
-          <div style={{ margin: '8px 0' }}>
-            <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>
-              Labels on the board
-            </Toggle>
+        {!board.guide.hidden && !selected ? <Guide board={board} now={now} goTo={setTab} /> : null}
+        <div class={styles.overview}>
+          <div class={styles.overviewLine}>
+            <span>
+              {b.stats.epics} epics · {b.stats.features} features · {b.stats.tasks} tasks
+            </span>
+            {board.issues.length ? (
+              <span class={styles.inlineToggle} title="Show each linked sticky's issue, sprint and status on the board">
+                <Toggle value={board.labelsOn} onValueChange={(v: boolean) => emit<SetLabelsHandler>('SET_LABELS', v)}>
+                  Labels
+                </Toggle>
+              </span>
+            ) : null}
           </div>
-        ) : null}
-        <div class={styles.summary}>
-          <div class={styles.stat}><span class={styles.statValue}>{b.stats.epics}</span><span class={styles.statLabel}>epics</span></div>
-          <div class={styles.stat}><span class={styles.statValue}>{b.stats.features}</span><span class={styles.statLabel}>features</span></div>
-          <div class={styles.stat}><span class={styles.statValue}>{b.stats.tasks}</span><span class={styles.statLabel}>tasks</span></div>
-          <div class={styles.stat}><span class={styles.statValue}>{b.milestones.length}</span><span class={styles.statLabel}>milestones</span></div>
-        </div>
-        {b.unmapped.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.unmapped.length} colour(s) not in the legend. Map them in Legend.</div> : null}
-        {b.orphans.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.orphans.length} item(s) have no parent column. They are listed at the bottom.</div> : null}
-        {b.milestones.length ? (
-          <div class={styles.chips}>
-            {releases.map((r) => (
-              <button key={r} class={`${styles.chip} ${filter === r ? styles.chipOn : ''}`} onClick={() => setFilter(r)}>
-                {r === 'all' ? 'All' : r === 'none' ? 'No milestone' : r}
-              </button>
+          {board.settings.issuesLoaded !== null ? (
+            <div class={styles.progress} title={`${progress.linked} of ${progress.total} stickies linked to an issue`}>
+              <div class={styles.progressBar} style={{ width: `${progress.total ? Math.round((progress.linked / progress.total) * 100) : 0}%` }} />
+              <span class={styles.progressText}>{progress.linked} of {progress.total} linked to GitHub</span>
+            </div>
+          ) : null}
+          {b.milestones.length || board.sprints.length ? (
+            <div class={styles.filters}>
+              {b.milestones.length ? (
+                <Dropdown
+                  value={filter}
+                  options={releases.map((r) => ({ value: r, text: r === 'all' ? 'All releases' : r === 'none' ? 'No release' : r }))}
+                  onValueChange={setFilter}
+                />
+              ) : null}
+              {board.sprints.length ? (
+                <Dropdown
+                  value={sprintFilter}
+                  options={[
+                    { value: 'all', text: 'All sprints' },
+                    ...board.sprints.map((x) => ({ value: x.title, text: `${x.title} · ends ${x.end.slice(5)}` })),
+                    { value: 'none', text: 'Not in a sprint' },
+                  ]}
+                  onValueChange={setSprintFilter}
+                />
+              ) : null}
+            </div>
+          ) : null}
+          <div class={styles.kinds}>
+            {(['epic', 'feature', 'task'] as Array<Kind>).map((k) => (
+              <span key={k}><span class={`${styles.dot} ${styles[k]}`} /> {KIND_LABEL[k]}</span>
             ))}
+            {b.notes.length ? <span><span class={`${styles.dot} ${styles.note}`} /> Note</span> : null}
           </div>
-        ) : null}
-        {board.sprints.length ? (
-          <div class={styles.chips}>
-            {['all', ...board.sprints.map((s) => s.title), 'none'].map((s) => {
-              const sprint = board.sprints.find((x) => x.title === s)
-              return (
-                <button key={s} class={`${styles.chip} ${sprintFilter === s ? styles.chipOn : ''}`} title={sprint ? `${sprint.start} to ${sprint.end}` : ''} onClick={() => setSprintFilter(s)}>
-                  {s === 'all' ? 'All sprints' : s === 'none' ? 'Not in a sprint' : s}
-                </button>
-              )
-            })}
-          </div>
-        ) : null}
+        </div>
+        {b.unmapped.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.unmapped.length} colour(s) not read yet. Set them in <button class={styles.linkButton} onClick={() => setTab('Reading')}>Reading</button>.</div> : null}
+        {b.orphans.length ? <div class={`${styles.notice} ${styles.warn}`}>{b.orphans.length} item(s) have no parent column. They are listed at the bottom.</div> : null}
         <ul class={styles.tree}>
           {b.epics.map((e) => {
             const inner = [...e.features.map(featureTree).filter(Boolean), ...e.tasks.filter(keep).map(taskTree)]
@@ -585,20 +606,24 @@ function Plugin() {
     )
   }
 
+  const toggleSection = (key: string) => setOpenSections((o) => ({ ...o, [key]: !o[key] }))
+
   const drift = () => {
     const d = board.drift
     if (!d) {
       return (
         <div class={styles.empty}>
-          <p><b>Compare with a repository first</b></p>
-          <p>Open GitHub, name the repository and press Compare.</p>
+          <p><b>Connect a repository first</b></p>
+          <p>
+            In <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button>, sign in and pick the repository of this map.
+          </p>
         </div>
       )
     }
     return (
       <Fragment>
         {d.drifts.length ? (
-          <p class={styles.help}>{d.drifts.length} place(s) where the map and GitHub disagree. Nothing is changed: decide with the team which side is right.</p>
+          <p class={styles.lead}>{d.drifts.length === 1 ? 'One place' : `${d.drifts.length} places`} where the map and GitHub disagree. Nothing is changed: decide with the team which side is right.</p>
         ) : (
           <div class={`${styles.notice} ${styles.ok}`}>The linked stickies and their issues agree.</div>
         )}
@@ -638,18 +663,36 @@ function Plugin() {
             </div>
           )
         })}
-        {d.toConfirm.length ? <p class={styles.help}>{d.toConfirm.length} possible match(es) to confirm from their card.</p> : null}
-        {d.onlyOnBoard.length ? <p class={styles.help}>{d.onlyOnBoard.length} item(s) on the map have no issue linked.</p> : null}
+        {d.toConfirm.length ? (
+          <Disclosure open={Boolean(openSections.confirm)} onClick={() => toggleSection('confirm')} title={`Close titles to confirm · ${d.toConfirm.length}`}>
+            {d.toConfirm.map((i) => (
+              <div class={styles.row} key={i.id} onClick={() => open(i.id)} onMouseEnter={() => focus(i.id, false)}>
+                <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
+                <span class={styles.label}>{i.title}</span>
+                <span class={`${styles.pill} ${styles.pillMaybe}`}>#{i.number}?</span>
+              </div>
+            ))}
+          </Disclosure>
+        ) : null}
+        {d.onlyOnBoard.length ? (
+          <Disclosure open={Boolean(openSections.board)} onClick={() => toggleSection('board')} title={`On the map only · ${d.onlyOnBoard.length}`}>
+            {d.onlyOnBoard.map((i) => (
+              <div class={styles.row} key={i.id} onClick={() => open(i.id)} onMouseEnter={() => focus(i.id, false)}>
+                <span class={`${styles.dot} ${styles[i.kind as Kind] || ''}`} title={KIND_LABEL[i.kind]} />
+                <span class={styles.label}>{i.title}</span>
+              </div>
+            ))}
+          </Disclosure>
+        ) : null}
         {d.onlyOnGitHub.length ? (
-          <Fragment>
-            <p class={styles.sectionTitle}>Open issues not on the map</p>
+          <Disclosure open={Boolean(openSections.github)} onClick={() => toggleSection('github')} title={`On GitHub only · ${d.onlyOnGitHub.length} open issues`}>
             {d.onlyOnGitHub.map((i) => (
               <div class={styles.row} key={i.number} onClick={() => i.url && emit<OpenHandler>('OPEN', i.url)}>
                 <span class={styles.label}>#{i.number} {i.title}</span>
                 {i.milestone ? <span class={`${styles.pill} ${styles.pillMilestone}`}>{i.milestone}</span> : null}
               </div>
             ))}
-          </Fragment>
+          </Disclosure>
         ) : null}
       </Fragment>
     )
@@ -893,43 +936,39 @@ function Plugin() {
     )
   }
 
-  const tabContent: Record<string, () => h.JSX.Element> = { Preview: preview, Drift: drift, Legend: legend, GitHub: github }
+  const tabContent: Record<string, () => h.JSX.Element> = { Map: preview, Differences: drift, Reading: legend, GitHub: github }
 
   return (
     <div class={styles.app}>
       <div class={styles.header}>
-        <div class={styles.titleRow}>
-          <span class={styles.title}>Storymap to GitHub</span>
-          {board.guide.hidden ? (
-            <Button
-              secondary
-              onClick={() => {
-                emit<SetGuideHandler>('SET_GUIDE', { hidden: false })
-                setTab('Preview')
-              }}
-            >
-              Guide
-            </Button>
-          ) : null}
-          <Button secondary onClick={() => emit<RefreshHandler>('REFRESH')}>Refresh</Button>
+        <div class={styles.headerText}>
+          <div class={styles.headerRepo}>
+            {board.settings.repo ? (
+              <button class={styles.headerLink} onClick={() => setTab('GitHub')} title="Change the repository">
+                {board.settings.repo}
+              </button>
+            ) : (
+              <button class={styles.headerLink} onClick={() => setTab('GitHub')}>Connect GitHub</button>
+            )}
+          </div>
+          <div class={styles.scope}>
+            Page {board.page}
+            {board.settings.issuesLoaded !== null ? ` · ${board.settings.issuesLoaded} issues` : ''}
+            {board.readAt ? ` · updated ${ago(board.readAt, now)}` : ''}
+          </div>
         </div>
-        <div class={styles.scope}>
-          Reading page <b>{board.page}</b>
-          {board.settings.issuesLoaded !== null ? ` · ${board.settings.issuesLoaded} issues of ${board.settings.repo}` : ' · not connected to GitHub'}
-          {board.readAt ? `, updated ${ago(board.readAt, now)}` : ''}
-        </div>
+        {board.guide.hidden ? <Button secondary onClick={() => { emit<SetGuideHandler>('SET_GUIDE', { hidden: false }); setTab('Map') }}>Guide</Button> : null}
+        <IconButton onClick={() => emit<RefreshHandler>('REFRESH')} title="Read the board and GitHub again">
+          <IconRefresh16 />
+        </IconButton>
       </div>
-      <Tabs
-        value={tab}
-        onValueChange={setTab}
-        options={['Preview', 'Drift', 'Legend', 'GitHub'].map((name) => ({ value: name, children: null }))}
-      />
+      <Tabs value={tab} onValueChange={setTab} options={TAB_NAMES.map((value) => ({ value, children: null }))} />
       <div class={styles.main}>{tabContent[tab]()}</div>
       <div class={styles.footer}>
-        <span class={styles.footerNote}>
-          {board.settings.writeAllowed ? `Changes to ${board.settings.repo} allowed.` : 'Nothing is written to GitHub.'}
-          {board.labelsOn ? ' Labels on the board are on.' : ''}
-        </span>
+        <button class={styles.mode} onClick={() => setTab('GitHub')} title="What the plugin may do on GitHub">
+          {board.settings.writeAllowed ? <IconPublish16 /> : <IconLockLocked16 />}
+          {board.settings.writeAllowed ? 'Creates issues' : 'Read only'}
+        </button>
         <Button
           secondary
           onClick={() => {
