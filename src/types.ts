@@ -2,7 +2,7 @@
 // typed style of Create Figma Plugin's `emit` and `on`.
 import { EventHandler } from '@create-figma-plugin/utilities'
 
-import type { Backlog, DriftReport, ItemType, Matches, PaletteEntry, ReadingMode, Sprint } from './core'
+import type { Backlog, DriftReport, ItemType, Matches, PaletteEntry, Publishing, ReadingMode, RepoMeta, Sprint } from './core'
 
 export interface IssueSummary {
   number: number
@@ -36,6 +36,11 @@ export interface BoardPayload {
     mode: ReadingMode
     hasToken: boolean
     issuesLoaded: number | null
+    // What the repository offers to new issues, read with its issues.
+    meta: (RepoMeta & { canPush: boolean }) | null
+    // Whether the team allowed the plugin to write to this repository.
+    writeAllowed: boolean
+    publishing: Publishing
   }
 }
 
@@ -121,6 +126,18 @@ export interface SetGuideHandler extends EventHandler {
 export interface SetLabelsHandler extends EventHandler {
   name: 'SET_LABELS'
   handler: (on: boolean) => void
+}
+export interface SetWriteHandler extends EventHandler {
+  name: 'SET_WRITE'
+  handler: (allowed: boolean) => void
+}
+export interface SetPublishingHandler extends EventHandler {
+  name: 'SET_PUBLISHING'
+  handler: (change: Partial<Publishing>) => void
+}
+export interface PublishHandler extends EventHandler {
+  name: 'PUBLISH'
+  handler: (id: string, title: string) => void
 }
 export interface ResizeWindowHandler extends EventHandler {
   name: 'RESIZE_WINDOW'

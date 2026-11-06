@@ -8,6 +8,7 @@ import {
   buildBacklog,
   buildPalette,
   defaultLegend,
+  draftIssue,
   explainEvents,
   findDrift,
   labelText,
@@ -17,7 +18,7 @@ import {
   readProject,
   toMarkdown,
 } from './core'
-import type { Backlog, BoardItem, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, RGB, ReadingMode, Sprint } from './core'
+import type { Backlog, BoardItem, Issue, ItemType, Matches, PaletteEntry, ProjectBoard, Publishing, RGB, ReadingMode, RepoMeta, Sprint } from './core'
 import type {
   BoardHandler,
   CompareHandler,
@@ -25,6 +26,7 @@ import type {
   ForgetTokenHandler,
   LinkHandler,
   OpenHandler,
+  PublishHandler,
   ReadyHandler,
   RefreshHandler,
   ResizeWindowHandler,
@@ -33,6 +35,8 @@ import type {
   SetLabelsHandler,
   SetLegendHandler,
   SetModeHandler,
+  SetPublishingHandler,
+  SetWriteHandler,
   SetRowTypeHandler,
   StatusHandler,
   WhyHandler,
@@ -62,7 +66,14 @@ interface State {
   labelsOn: boolean
   guide: Guide
   readAt: number | null
+  meta: (RepoMeta & { canPush: boolean }) | null
+  writeAllowed: boolean
+  publishing: Publishing
 }
+
+// Generic starting values for a new issue; each team changes them in the
+// GitHub tab, per repository.
+const DEFAULT_PUBLISHING: Publishing = { startLabel: 'needs-refinement', startStatus: 'Backlog' }
 
 const state: State = {
   items: [],
@@ -82,6 +93,9 @@ const state: State = {
   labelsOn: false,
   guide: { readingConfirmed: false, hidden: false },
   readAt: null,
+  meta: null,
+  writeAllowed: false,
+  publishing: { ...DEFAULT_PUBLISHING },
 }
 
 // Settings that belong to one board are stored under the file's name.
@@ -184,6 +198,15 @@ async function loadSettings() {
   state.rowTypes = reading.rowTypes || {}
   state.labelsOn = Boolean(await figma.clientStorage.getAsync(fileKey('labels')))
   state.guide = { readingConfirmed: false, hidden: false, ...((await figma.clientStorage.getAsync(fileKey('guide'))) || {}) }
+  await loadRepoSettings()
+}
+
+// Writing to GitHub is allowed per repository, off until the team turns it on.
+const repoKey = (name: string) => `${name}:${state.repo.toLowerCase()}`
+
+async function loadRepoSettings() {
+  state.writeAllowed = Boolean(state.repo) && Boolean(await figma.clientStorage.getAsync(repoKey('write')))
+  state.publishing = { ...DEFAULT_PUBLISHING, ...((await figma.clientStorage.getAsync(repoKey('publishing'))) || {}) }
 }
 
 const saveReading = () => figma.clientStorage.setAsync(fileKey('reading'), { mode: state.mode, rowTypes: state.rowTypes })
@@ -227,6 +250,9 @@ function publish() {
       mode: state.mode,
       hasToken: Boolean(state.token),
       issuesLoaded: state.issues ? state.issues.length : null,
+      meta: state.meta,
+      writeAllowed: state.writeAllowed,
+      publishing: state.publishing,
     },
   })
   void syncLabels()
@@ -311,6 +337,112 @@ async function fetchProject(): Promise<ProjectBoard> {
     cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : null
   } while (cursor && pages.length < 20)
   return readProject(pages)
+}
+
+// What a new issue can carry in this repository: the owner's issue types,
+// the milestones, and whether the token may write at all.
+async function fetchMeta(): Promise<RepoMeta & { canPush: boolean }> {
+  const owner = state.repo.split('/')[0]
+  const get = async (path: string) => {
+    const res = await fetch(`https://api.github.com/${path}`, { headers: githubHeaders() })
+    return res.ok ? res.json() : null
+  }
+  const [repo, milestones, types] = await Promise.all([
+    get(`repos/${state.repo}`),
+    get(`repos/${state.repo}/milestones?state=all&per_page=100`),
+    get(`orgs/${owner}/issue-types`),
+  ])
+  return {
+    canPush: Boolean(repo && repo.permissions && repo.permissions.push),
+    milestones: ((milestones || []) as Array<{ title: string; number: number }>).map((m) => ({ title: m.title, number: m.number })),
+    types: ((types || []) as Array<{ name: string }>).map((t) => t.name),
+  }
+}
+
+async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  const res = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables }),
+  })
+  const body = (await res.json()) as { data?: T; errors?: Array<{ message: string }> }
+  if (!res.ok || body.errors || !body.data) throw new Error(body.errors ? body.errors[0].message : `GitHub answered ${res.status}.`)
+  return body.data
+}
+
+// Adds an issue to the project board and sets its starting status, when the
+// board has that status. Returns what was done, for the message.
+async function addToProject(nodeId: string, status: string | null): Promise<string> {
+  const target = parseProjectUrl(state.project)
+  if (!target) return ''
+  const data = await graphql<{ owner: { projectV2: { id: string; field: { id: string; options: Array<{ id: string; name: string }> } | null } } }>(
+    `query($owner: String!, $number: Int!) { owner: ${target.kind}(login: $owner) { projectV2(number: $number) { id field(name: "Status") { ... on ProjectV2SingleSelectField { id options { id name } } } } } }`,
+    { owner: target.owner, number: target.number },
+  )
+  const project = data.owner.projectV2
+  const added = await graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
+    'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }',
+    { project: project.id, content: nodeId },
+  )
+  if (!status) return ' Added to the board.'
+  const option = project.field && project.field.options.find((o) => o.name.toLowerCase() === status.toLowerCase())
+  if (!project.field || !option) return ` Added to the board, without status: it has no "${status}" status.`
+  await graphql(
+    'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }',
+    { project: project.id, item: added.addProjectV2ItemById.item.id, field: project.field.id, option: option.id },
+  )
+  return ` Added to the board in ${option.name}.`
+}
+
+// Publishes one sticky as an issue: the issue, its place under its parent,
+// the project board, then the link on the sticky. Only when the team allowed
+// writing to this repository.
+async function publishSticky(id: string, title: string) {
+  if (!state.writeAllowed) throw new Error(`Changes to ${state.repo} are not allowed. Turn them on in the GitHub tab.`)
+  if (!state.token) throw new Error('Publishing needs a token that can write issues.')
+  if (!state.backlog || !state.meta) throw new Error('Compare with GitHub first.')
+  const draft = draftIssue(id, state.backlog, state.matches, state.meta, state.publishing)
+  if (!draft) throw new Error('This sticky is already an issue.')
+  const name = title.trim() || draft.title
+  emit<StatusHandler>('STATUS', { state: 'loading', text: `Creating "${name}" in ${state.repo}…` })
+  const res = await fetch(`https://api.github.com/repos/${state.repo}/issues`, {
+    method: 'POST',
+    headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: name,
+      body: draft.body,
+      labels: draft.labels,
+      ...(draft.milestone ? { milestone: draft.milestone.number } : {}),
+      ...(draft.type ? { type: draft.type } : {}),
+    }),
+  })
+  if (!res.ok) {
+    const detail = ((await res.json().catch(() => ({}))) as { message?: string }).message
+    throw new Error(`GitHub refused the issue (${res.status}${detail ? `: ${detail}` : ''}).`)
+  }
+  const made = (await res.json()) as RawIssue & { id: number; node_id: string }
+  writeLink(id, made.number)
+  let note = `#${made.number} created.`
+  const problems: Array<string> = []
+  if (draft.parent && draft.parent.number) {
+    const sub = await fetch(`https://api.github.com/repos/${state.repo}/issues/${draft.parent.number}/sub_issues`, {
+      method: 'POST',
+      headers: { ...githubHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub_issue_id: made.id }),
+    })
+    if (sub.ok) note += ` Sub-issue of #${draft.parent.number}.`
+    else problems.push(`not made a sub-issue of #${draft.parent.number} (GitHub answered ${sub.status})`)
+  }
+  if (state.project) {
+    try {
+      note += await addToProject(made.node_id, draft.status)
+    } catch (err) {
+      problems.push(`not added to the board (${err instanceof Error ? err.message : String(err)})`)
+    }
+  }
+  // Read GitHub again, so the tree, the labels and drift show the new issue.
+  await compare()
+  emit<StatusHandler>('STATUS', { state: problems.length ? 'warn' : 'ok', text: problems.length ? `${note} But ${problems.join(', ')}.` : note })
 }
 
 const withProject = (issues: Array<Issue>, project: ProjectBoard): Array<Issue> =>
@@ -431,6 +563,7 @@ function onSelectionChange() {
 async function compare() {
   emit<StatusHandler>('STATUS', { state: 'loading', text: `Reading issues of ${state.repo}…` })
   state.issues = await fetchIssues()
+  state.meta = await fetchMeta()
   let note = `${state.issues.length} issues read from ${state.repo}.`
   let warn = false
   state.sprints = []
@@ -510,6 +643,7 @@ export default function () {
       await figma.clientStorage.setAsync('project', state.project)
       if (token) await figma.clientStorage.setAsync('token', state.token)
       readLinks()
+      await loadRepoSettings()
       await compare()
     })().catch(fail)
   })
@@ -539,6 +673,22 @@ export default function () {
   on<SetLabelsHandler>('SET_LABELS', (labelsOn) => {
     state.labelsOn = labelsOn
     void figma.clientStorage.setAsync(fileKey('labels'), labelsOn).then(publish).catch(fail)
+  })
+
+  on<SetWriteHandler>('SET_WRITE', (allowed) => {
+    if (!state.repo) return
+    state.writeAllowed = allowed
+    void figma.clientStorage.setAsync(repoKey('write'), allowed).then(publish).catch(fail)
+  })
+
+  on<SetPublishingHandler>('SET_PUBLISHING', (change) => {
+    if (!state.repo) return
+    state.publishing = { ...state.publishing, ...change }
+    void figma.clientStorage.setAsync(repoKey('publishing'), state.publishing).then(publish).catch(fail)
+  })
+
+  on<PublishHandler>('PUBLISH', (id, title) => {
+    void publishSticky(id, title).catch(fail)
   })
 
   on<ResizeWindowHandler>('RESIZE_WINDOW', ({ width, height }) => figma.ui.resize(width, height))

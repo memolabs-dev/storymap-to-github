@@ -16,7 +16,7 @@ import { emit, on } from '@create-figma-plugin/utilities'
 import { Fragment, h } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 
-import { normalize, suggestIssues } from './core'
+import { draftIssue, normalize, suggestIssues } from './core'
 import type { Drift, Feature, ItemType, MapNode, Task } from './core'
 import type {
   BoardHandler,
@@ -27,6 +27,7 @@ import type {
   IssueSummary,
   LinkHandler,
   OpenHandler,
+  PublishHandler,
   ReadyHandler,
   RefreshHandler,
   ResizeWindowHandler,
@@ -35,7 +36,9 @@ import type {
   SetLabelsHandler,
   SetLegendHandler,
   SetModeHandler,
+  SetPublishingHandler,
   SetRowTypeHandler,
+  SetWriteHandler,
   StatusHandler,
   StatusPayload,
   WhyHandler,
@@ -236,6 +239,12 @@ function Plugin() {
   const [search, setSearch] = useState('')
   const [copied, setCopied] = useState('')
   const [now, setNow] = useState(Date.now())
+  // The title typed in the publish preview, and the sticky last published
+  // from its card, to show how it went there.
+  const [draftTitle, setDraftTitle] = useState('')
+  const [publishedFrom, setPublishedFrom] = useState<string | null>(null)
+  const [startLabel, setStartLabel] = useState<string | null>(null)
+  const [startStatus, setStartStatus] = useState<string | null>(null)
 
   // Keeps "updated 3 min ago" true while the window stays open.
   useEffect(() => {
@@ -257,6 +266,7 @@ function Plugin() {
       on<SelectedHandler>('SELECTED', (id) => {
         setSelected(id)
         setSearch('')
+        setDraftTitle('')
         if (id) setTab('Preview')
       }),
     ]
@@ -271,6 +281,7 @@ function Plugin() {
   const open = (id: string) => {
     setSelected(id)
     setSearch('')
+    setDraftTitle('')
     focus(id, true)
   }
 
@@ -371,7 +382,7 @@ function Plugin() {
           {item.release ? ` · ${item.release}` : ''}
         </div>
         {!canLink ? <p class={styles.help}>{kind === 'step' ? 'Steps are written in their feature, not as issues.' : 'Notes stay on the board, not on GitHub.'}</p> : null}
-        {canLink && !board.issues.length ? (
+        {canLink && board.settings.issuesLoaded === null ? (
           <p class={styles.help}>
             Connect a repository in <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button> to see this sticky's issue.
           </p>
@@ -413,6 +424,61 @@ function Plugin() {
             </div>
           </Fragment>
         ) : null}
+        {canLink && !issue ? publishBox(item.id) : null}
+        {publishedFrom === item.id && status ? <div class={`${styles.notice} ${styles[status.state === 'loading' ? 'info' : status.state]}`} role="status">{status.text}</div> : null}
+      </div>
+    )
+  }
+
+  // The issue a sticky would become, with what it will carry, before
+  // anything is written. Publishing is off until the team allows it for
+  // this repository in the GitHub tab.
+  const publishBox = (id: string) => {
+    const { meta, publishing, writeAllowed, repo: repoName, project: projectUrl } = board.settings
+    if (!meta) return null
+    const draft = draftIssue(id, b, board.matches, meta, publishing)
+    if (!draft) return null
+    const busy = status !== null && status.state === 'loading'
+    const title = draftTitle || draft.title
+    const lines: Array<[string, string]> = [
+      ['Type', draft.type ? draft.type : `label "${draft.kind}" (no ${KIND_LABEL[draft.kind]} type here)`],
+      ['Parent', draft.parent ? (draft.parent.number ? `#${draft.parent.number} ${draft.parent.title}` : `${draft.parent.title}, not on GitHub yet`) : 'None'],
+      ['Milestone', draft.milestone ? draft.milestone.title : 'None'],
+      ['Labels', draft.labels.length ? draft.labels.join(', ') : 'None'],
+    ]
+    if (projectUrl) lines.push(['On the board', draft.status || 'Added, without status'])
+    return (
+      <div class={styles.publish}>
+        <span class={styles.fieldLabel}>Or publish it as a new issue in {repoName}</span>
+        <Textbox value={title} onValueInput={setDraftTitle} spellCheck={false} />
+        <dl class={styles.draft}>
+          {lines.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </Fragment>
+          ))}
+        </dl>
+        {draft.warnings.map((w) => (
+          <div key={w} class={`${styles.notice} ${styles.warn}`}>{w}</div>
+        ))}
+        {writeAllowed ? (
+          <div class={styles.actions}>
+            <Button
+              disabled={busy || !title.trim()}
+              onClick={() => {
+                setPublishedFrom(id)
+                emit<PublishHandler>('PUBLISH', id, title)
+              }}
+            >
+              Create the issue
+            </Button>
+          </div>
+        ) : (
+          <p class={styles.help}>
+            Changes to {repoName} are off. Allow them in <button class={styles.linkButton} onClick={() => setTab('GitHub')}>GitHub</button> to publish from here.
+          </p>
+        )}
       </div>
     )
   }
@@ -630,7 +696,7 @@ function Plugin() {
         <span class={styles.fieldLabel}>Token (optional)</span>
         <Textbox value={token} onValueInput={setToken} password placeholder={board.settings.hasToken ? 'Saved on this computer' : 'Needed for sprints or a private repository'} />
       </div>
-      <p class={styles.help}>Read only. Sprints need a token that can read projects (classic token: read:project, and repo for a private repository). It stays on this computer.</p>
+      <p class={styles.help}>Sprints need a token that can read projects (classic token: read:project, and repo for a private repository). Publishing needs repo and project. The token stays on this computer.</p>
       <div class={styles.actions}>
         <Button
           onClick={() => {
@@ -642,8 +708,43 @@ function Plugin() {
         </Button>
         {board.settings.hasToken ? <Button secondary onClick={() => emit<ForgetTokenHandler>('FORGET_TOKEN')}>Forget token</Button> : null}
       </div>
+      {board.settings.repo && board.settings.meta ? writing() : null}
     </Fragment>
   )
+
+  // Writing to GitHub: off by default, per repository, with the values a
+  // new issue starts with, which each team sets to its own words.
+  const writing = () => {
+    const { repo: repoName, meta, publishing, writeAllowed } = board.settings
+    const save = (change: { startLabel?: string; startStatus?: string }) => emit<SetPublishingHandler>('SET_PUBLISHING', change)
+    return (
+      <div class={styles.publish}>
+        <Toggle value={writeAllowed} onValueChange={(v: boolean) => emit<SetWriteHandler>('SET_WRITE', v)}>
+          Allow changes to {repoName}
+        </Toggle>
+        <p class={styles.help}>Off by default. When on, a sticky's card can create its issue in {repoName}, after showing what it will be. Nothing else is changed.</p>
+        {meta && !meta.canPush ? <div class={`${styles.notice} ${styles.warn}`}>This token cannot write to {repoName}: publishing will fail.</div> : null}
+        <div class={styles.field}>
+          <span class={styles.fieldLabel}>Label of a new issue (empty for none)</span>
+          <Textbox
+            value={startLabel === null ? publishing.startLabel : startLabel}
+            onValueInput={setStartLabel}
+            onBlur={() => startLabel !== null && save({ startLabel: startLabel.trim() })}
+            spellCheck={false}
+          />
+        </div>
+        <div class={styles.field}>
+          <span class={styles.fieldLabel}>Status of a new issue on the project board (empty for none)</span>
+          <Textbox
+            value={startStatus === null ? publishing.startStatus : startStatus}
+            onValueInput={setStartStatus}
+            onBlur={() => startStatus !== null && save({ startStatus: startStatus.trim() })}
+            spellCheck={false}
+          />
+        </div>
+      </div>
+    )
+  }
 
   const tabContent: Record<string, () => h.JSX.Element> = { Preview: preview, Drift: drift, Legend: legend, GitHub: github }
 

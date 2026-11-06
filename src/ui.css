@@ -63,6 +63,10 @@
 .driftSides { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 2px 8px; margin-bottom: 4px; }
 .driftSide { color: var(--figma-color-text-tertiary); }
 .history { margin: 4px 0 0; padding-left: 16px; color: var(--figma-color-text-secondary); }
+.publish { border-top: 1px solid var(--figma-color-border); margin-top: 12px; padding-top: 10px; }
+.draft { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0; }
+.draft dt { color: var(--figma-color-text-secondary); }
+.draft dd { margin: 0; overflow-wrap: anywhere; }
 .help { color: var(--figma-color-text-tertiary); margin: 4px 0; }
 
 .legendRow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 120px; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--figma-color-border); }

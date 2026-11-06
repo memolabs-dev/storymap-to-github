@@ -703,7 +703,68 @@ function labelText(issue) {
   return parts.join(' · ');
 }
 
+// The parent of every epic, feature and task on the map: a feature's epic,
+// a task's feature (or epic), a sub-task's task.
+function parentsOf(backlog) {
+  const parents = new Map();
+  const tasks = (list, parent) => {
+    for (const t of list) {
+      parents.set(t.id, parent);
+      tasks(t.subtasks || [], { item: t, kind: 'task' });
+    }
+  };
+  for (const e of backlog.epics) {
+    tasks(e.tasks, { item: e, kind: 'epic' });
+    for (const f of e.features) {
+      parents.set(f.id, { item: e, kind: 'epic' });
+      tasks(f.tasks, { item: f, kind: 'feature' });
+    }
+  }
+  for (const f of backlog.looseFeatures) tasks(f.tasks, { item: f, kind: 'feature' });
+  return parents;
+}
+
+const TYPE_NAMES = { epic: 'Epic', feature: 'Feature', task: 'Task' };
+const isIssue = (m) => Boolean(m) && (m.status === 'linked' || m.status === 'exists');
+
+// The issue a sticky would become, shown to the team before anything is
+// written. repo: { types: issue type names of the owner, milestones: [{ title,
+// number }] }. publishing: { startLabel, startStatus }, both may be empty.
+// Returns null for a sticky that already is an issue.
+function draftIssue(id, backlog, matches, repo, publishing) {
+  const found = allItems(backlog).find((x) => x.item.id === id);
+  if (!found || isIssue(matches[id])) return null;
+  const { item, kind } = found;
+  const warnings = [];
+  const typeName = TYPE_NAMES[kind];
+  const type = (repo.types || []).includes(typeName) ? typeName : null;
+  const labels = [...(type ? [] : [kind]), ...(publishing.startLabel ? [publishing.startLabel] : [])];
+
+  const up = parentsOf(backlog).get(id) || null;
+  let parent = null;
+  if (up) {
+    const pm = matches[up.item.id];
+    parent = { id: up.item.id, title: up.item.title, number: isIssue(pm) ? pm.number : null };
+    if (parent.number === null) warnings.push(`"${up.item.title}" is not on GitHub yet: publish it first to make this issue its sub-issue.`);
+  }
+
+  let milestone = null;
+  if (item.release) {
+    const hit = (repo.milestones || []).find((ms) => sameRelease(item.release, ms.title));
+    if (hit) milestone = { title: hit.title, number: hit.number };
+    else warnings.push(`No milestone on GitHub matches the release "${item.release}": the issue will have none.`);
+  }
+
+  const lines = ['From the story map in FigJam.'];
+  if (parent) lines.push('', `Part of: ${parent.title}${parent.number ? ` (#${parent.number})` : ''}`);
+  if (item.release) lines.push(`Release on the map: ${item.release}`);
+  if (kind === 'feature' && item.steps && item.steps.length) lines.push('', 'Steps on the map:', ...item.steps.map((s) => `- [ ] ${s.title}`));
+
+  return { id, kind, title: item.title, body: lines.join('\n'), type, labels, parent, milestone, status: publishing.startStatus || null, warnings };
+}
+
 export {
+  draftIssue,
   TYPES, LEGEND_PATTERN, hexOf, hueName, buildPalette, defaultLegend, isReleaseLabel, findReleases, findRows, usesRows,
   buildBacklog, normalize, similarity, matchIssues, allItems, sameRelease, findDrift, explainEvents, parseProjectUrl,
   projectQuery, readProject, toMarkdown, suggestIssues, labelText,

@@ -351,3 +351,50 @@ test('the board label sums up the issue in a few words', () => {
   assert.equal(core.labelText({ number: 8, state: 'open', sprint: 'Sprint 2' }), '#8 · Sprint 2');
   assert.equal(core.labelText({ number: 3, state: 'closed', status: 'Done' }), '#3 · Closed');
 });
+
+// Publishing a sticky: the issue it would become, before anything is written.
+const repoMeta = { types: ['Task', 'Feature', 'Bug'], milestones: [{ title: 'P0 · MVP', number: 3 }] };
+const publishing = { startLabel: 'needs-refinement', startStatus: 'Backlog' };
+
+test('a task is drafted with its parent, its milestone and the starting label', () => {
+  const b = core.buildBacklog(board(), legend);
+  const issues = [{ number: 7, title: 'Find a book' }];
+  const matches = core.matchIssues(b, issues);
+  const task = find(b, 'Back-office');
+  const d = core.draftIssue(task.id, b, matches, repoMeta, publishing);
+  assert.equal(d.kind, 'task');
+  assert.equal(d.title, 'Back-office');
+  assert.equal(d.type, 'Task');
+  assert.deepEqual(d.labels, ['needs-refinement']);
+  assert.deepEqual(d.parent, { id: find(b, 'Find a book').id, title: 'Find a book', number: 7 });
+  assert.deepEqual(d.milestone, { title: 'P0 · MVP', number: 3 });
+  assert.equal(d.status, 'Backlog');
+  assert.deepEqual(d.warnings, []);
+});
+
+test('a missing issue type becomes a label, a missing parent or milestone a warning', () => {
+  const b = core.buildBacklog(board(), legend);
+  const matches = core.matchIssues(b, []);
+  const epic = core.draftIssue(b.epics[0].id, b, matches, repoMeta, { startLabel: '', startStatus: '' });
+  assert.equal(epic.type, null);
+  assert.deepEqual(epic.labels, ['epic']);
+  assert.equal(epic.parent, null);
+  assert.equal(epic.status, null);
+  const task = core.draftIssue(find(b, 'Import books from a spreadsheet').id, b, matches, repoMeta, publishing);
+  assert.equal(task.parent.number, null);
+  assert.equal(task.milestone, null);
+  assert.equal(task.warnings.length, 2);
+  assert.match(task.warnings[0], /Add new books/);
+  assert.match(task.warnings[1], /P1/);
+});
+
+test('a feature body lists its steps, and a linked sticky has no draft', () => {
+  const b = core.buildBacklog(board(), legend);
+  const feature = find(b, 'Find a book');
+  const d = core.draftIssue(feature.id, b, core.matchIssues(b, []), repoMeta, publishing);
+  assert.equal(d.type, 'Feature');
+  assert.equal(d.parent.title, 'Catalogue');
+  assert.match(d.body, /- \[ \] Search by title or author/);
+  const linked = core.matchIssues(b, [{ number: 7, title: 'Find a book' }]);
+  assert.equal(core.draftIssue(feature.id, b, linked, repoMeta, publishing), null);
+});

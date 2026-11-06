@@ -1,6 +1,6 @@
 # Storymap to GitHub
 
-A FigJam plugin that reads a user story map as the GitHub backlog it is, or will become: epics, features with their steps, tasks and milestones. The map and the plugin window answer each other: hover a row to find its sticky, click a sticky to open its card. It shows where the map and GitHub disagree, and can put a small label on each linked sticky. It never writes to GitHub.
+A FigJam plugin that reads a user story map as the GitHub backlog it is, or will become: epics, features with their steps, tasks and milestones. The map and the plugin window answer each other: hover a row to find its sticky, click a sticky to open its card. It shows where the map and GitHub disagree, can put a small label on each linked sticky, and, once the team allows it, publishes a sticky as an issue from its card.
 
 ![The plugin preview on a sample library app story map](docs/preview.jpg)
 
@@ -27,7 +27,9 @@ The plugin reads the whole current page and needs edit access to the file: Figma
 
 In the GitHub tab, name the repository and press Compare. Items whose title matches an issue (case, accents, `Epic:` prefixes and small words ignored) are linked. For the others, click the sticky on the board: its card shows the three issues it most likely is, with the words they share, a search box, and "Not on GitHub yet". Links are saved in the file, on each sticky and for each repository, so everyone working on the board sees the same ones.
 
-**Labels on the board.** Once a repository is compared, the "Labels on the board" switch puts a small locked label in the corner of every linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves, are updated on every read, and all go away when the switch is turned off. Labels and links are the only things the plugin writes, and only on the board.
+**Publishing a sticky.** The card of a sticky that is not on GitHub yet shows the issue it would become: its title, which you can edit, its type, its parent, its milestone from the release row, its labels, and its status on the project board. Then "Create the issue" creates it, makes it a sub-issue of its parent, adds it to the board and links the sticky. Nothing is written until the team turns on "Allow changes to owner/repo" in the GitHub tab, which is off for every repository by default. The label and status a new issue starts with are set there too, for each repository (by default `needs-refinement` and `Backlog`). If the owner has no issue type for an epic, feature or task, a label of that name stands in for it. A sticky whose parent is not on GitHub yet is published without a parent, and the preview says so.
+
+**Labels on the board.** Once a repository is compared, the "Labels on the board" switch puts a small locked label in the corner of every linked sticky, such as `#19 · Sprint 1 · Ready`. Labels follow their sticky when it moves, are updated on every read, and all go away when the switch is turned off. Labels and links are written on the board only.
 
 ## Drift: where the map and GitHub disagree
 
@@ -71,7 +73,7 @@ npm run watch
 
 ## Status
 
-Reads, links, compares and labels. Next: publish a sticky as an issue (type, parent, milestone, project) from its card, and a real "Sign in with GitHub" instead of a token.
+Reads, links, compares, labels, and publishes one sticky at a time. Next: publishing several stickies at once after a review list, and a real "Sign in with GitHub" instead of a token.
 
 ## License
 

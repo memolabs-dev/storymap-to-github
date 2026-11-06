@@ -157,6 +157,30 @@ export interface ReadingOptions {
   rowTypes?: Record<string, ItemType>
 }
 
+export interface RepoMeta {
+  types: Array<string>
+  milestones: Array<{ title: string; number: number }>
+}
+
+export interface Publishing {
+  startLabel: string
+  startStatus: string
+}
+
+export interface IssueDraft {
+  id: string
+  kind: 'epic' | 'feature' | 'task'
+  title: string
+  body: string
+  type: string | null
+  labels: Array<string>
+  parent: { id: string; title: string; number: number | null } | null
+  milestone: { title: string; number: number } | null
+  status: string | null
+  warnings: Array<string>
+}
+
+export declare function draftIssue(id: string, backlog: Backlog, matches: Matches, repo: RepoMeta, publishing: Publishing): IssueDraft | null
 export declare const TYPES: Array<ItemType>
 export declare const LEGEND_PATTERN: RegExp
 export declare function hexOf(c: RGB): string
